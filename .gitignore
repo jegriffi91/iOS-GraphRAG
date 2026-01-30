@@ -50,3 +50,4 @@ mock_repo/
 
 # Work-Machine Specific (Do NOT commit production indexer)
 engine/core/indexer_prod.py
+engine/core/server_prod.py
