@@ -28,27 +28,36 @@ def hydrate():
     db_path = os.getenv("GRAPH_DB_PATH", "knowledge-graph.sqlite")
     conn = sqlite3.connect(db_path)
     
-    # Load Nodes & Vectors
-    # Explicitly naming columns to avoid "too many values to unpack" if schema has evolved
-    query = "SELECT id, name, type, file_path, start_byte, end_byte, signature, vector FROM nodes"
+    # Load Nodes (Production schema uses symbol_name, symbol_type, etc.)
+    query = """
+        SELECT id, file_path, symbol_name, symbol_type, start_byte, end_byte, signature
+        FROM nodes
+    """
     rows = conn.execute(query).fetchall()
-    vec_list = []
     
     for row in rows:
-        nid, name, ntype, path, start, end, sig, vec_blob = row
-        
-        GRAPH.add_node(nid, type=ntype, name=name)
+        nid, path, symbol_name, symbol_type, start, end, sig = row
+        GRAPH.add_node(nid, type=symbol_type, name=symbol_name)
         NODE_MAP[nid] = {"path": path, "range": (start, end), "sig": sig}
-        
+        NODE_IDS.append(nid)
+    
+    # Load Embeddings from separate table
+    vec_list = []
+    embedding_query = "SELECT node_id, embedding FROM node_embeddings ORDER BY node_id"
+    embedding_rows = conn.execute(embedding_query).fetchall()
+    node_id_to_vec_idx = {}
+    for idx, (node_id, vec_blob) in enumerate(embedding_rows):
         vec = np.frombuffer(vec_blob, dtype=np.float32)
         vec_list.append(vec)
-        NODE_IDS.append(nid)
+        node_id_to_vec_idx[node_id] = idx
         
-    # Load Edges
-    for src, tgt, rel in conn.execute("SELECT source, target, relation FROM edges"):
-        GRAPH.add_edge(src, tgt, relation=rel)
+    # Load Edges (Production schema uses source_node_id, target_node_id, edge_type)
+    edge_query = "SELECT source_node_id, target_node_id, edge_type FROM edges WHERE target_node_id IS NOT NULL"
+    for src, tgt, edge_type in conn.execute(edge_query):
+        if src in GRAPH and tgt in GRAPH:
+            GRAPH.add_edge(src, tgt, relation=edge_type)
         
-    # Prepare Matrix
+    # Prepare Vector Matrix
     global VECTORS
     if vec_list:
         VECTORS = np.array(vec_list)
@@ -57,7 +66,8 @@ def hydrate():
         VECTORS = VECTORS / (norm + 1e-10)
         
     conn.close()
-    print(f"⚡ Ready. {len(NODE_IDS)} nodes, {GRAPH.number_of_edges()} edges.")
+    print(f"⚡ Ready. {len(NODE_IDS)} nodes, {GRAPH.number_of_edges()} edges, {len(vec_list)} embeddings.")
+
 
 # --- TOOLS ---
 
