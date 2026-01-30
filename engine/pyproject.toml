@@ -11,5 +11,7 @@ dependencies = [
     "networkx",
     "numpy",
     "sentence-transformers",
-    "tqdm"
+    "tqdm",
+    "einops",
+    "torch",
 ]
