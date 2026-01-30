@@ -120,7 +120,7 @@ Pin tree-sitter-swift to a specific version in `pyproject.toml`:
 ```toml
 [project.dependencies]
 tree-sitter = ">=0.21.0"
-tree-sitter-swift = "0.6.0"  # Pin specific version
+tree-sitter-swift = "0.0.1"  # Pin specific version
 ```
 
 Document known parse failures in a `PARSER_LIMITATIONS.md` file.

@@ -1,7 +1,18 @@
+import os
+import ssl
 import sqlite3
 import networkx as nx
 import numpy as np
 from mcp.server.fastmcp import FastMCP
+
+# Bypass SSL verification for enterprise proxies
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+os.environ['CURL_CA_BUNDLE'] = ''
 
 mcp = FastMCP("iOS-Architect")
 
@@ -14,10 +25,13 @@ NODE_IDS = []   # List[ID] matching VECTORS rows
 def hydrate():
     """Warm-up: Load SQLite Map into RAM."""
     print("🔥 Hydrating In-Memory Graph...")
-    conn = sqlite3.connect("knowledge-graph.sqlite")
+    db_path = os.getenv("GRAPH_DB_PATH", "knowledge-graph.sqlite")
+    conn = sqlite3.connect(db_path)
     
     # Load Nodes & Vectors
-    rows = conn.execute("SELECT * FROM nodes").fetchall()
+    # Explicitly naming columns to avoid "too many values to unpack" if schema has evolved
+    query = "SELECT id, name, type, file_path, start_byte, end_byte, signature, vector FROM nodes"
+    rows = conn.execute(query).fetchall()
     vec_list = []
     
     for row in rows:
@@ -31,7 +45,7 @@ def hydrate():
         NODE_IDS.append(nid)
         
     # Load Edges
-    for src, tgt, rel in conn.execute("SELECT * FROM edges"):
+    for src, tgt, rel in conn.execute("SELECT source, target, relation FROM edges"):
         GRAPH.add_edge(src, tgt, relation=rel)
         
     # Prepare Matrix
