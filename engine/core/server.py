@@ -14,7 +14,7 @@ else:
     ssl._create_default_https_context = _create_unverified_https_context
 os.environ['CURL_CA_BUNDLE'] = ''
 
-mcp = FastMCP("ios-project-navigator")
+mcp = FastMCP("iOS-GraphRAG")
 
 # --- IN-MEMORY STATE ---
 GRAPH = nx.DiGraph()
