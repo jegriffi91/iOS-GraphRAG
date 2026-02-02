@@ -1,0 +1,54 @@
+{
+  "": {
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/master.swiftdeps"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/Calculator.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Calculator.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Calculator.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Calculator~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Calculator.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Calculator.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/Engine.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Engine.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Engine.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Engine~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Engine.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Engine.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/Operation.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Operation.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Operation.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Operation~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Operation.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/Operation.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/OperationFactory.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OperationFactory.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OperationFactory.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OperationFactory~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OperationFactory.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OperationFactory.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/OverloadTests.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OverloadTests.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OverloadTests.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OverloadTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OverloadTests.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/OverloadTests.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/ScientificCalculator.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/ScientificCalculator.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/ScientificCalculator.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/ScientificCalculator~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/ScientificCalculator.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/ScientificCalculator.dia"
+  },
+  "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/Sources/CalculatorApp/StateMachine.swift": {
+    "dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/StateMachine.d",
+    "object": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/StateMachine.swift.o",
+    "swiftmodule": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/StateMachine~partial.swiftmodule",
+    "swift-dependencies": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/StateMachine.swiftdeps",
+    "diagnostics": "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/StateMachine.dia"
+  }
+}

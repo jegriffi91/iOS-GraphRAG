@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     start_byte INTEGER NOT NULL,
     end_byte INTEGER NOT NULL,
     line_number INTEGER,
-    signature TEXT NOT NULL
+    signature TEXT NOT NULL,
+    selector TEXT                        -- Swift selector: "funcName(_:label:)" for overload disambiguation
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS node_embeddings (
 CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol_name ON nodes(symbol_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol_type ON nodes(symbol_type);
+CREATE INDEX IF NOT EXISTS idx_nodes_selector ON nodes(selector);
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_node_id);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_node_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type);
