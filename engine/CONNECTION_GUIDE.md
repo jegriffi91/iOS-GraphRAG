@@ -14,8 +14,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 1. **Create a tools directory:**
    ```bash
-   mkdir -p ~/tools/ios-architect
-   cd ~/tools/ios-architect
+   mkdir -p ~/tools/iOS-GraphRAG
+   cd ~/tools/iOS-GraphRAG
    ```
 
 2. **Initialize Environment:**
@@ -56,13 +56,13 @@ Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "ios-architect": {
-      "command": "/Users/YOUR_USER/tools/ios-architect/.venv/bin/python",
+    "iOS-GraphRAG": {
+      "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
       "args": [
-        "/Users/YOUR_USER/tools/ios-architect/server_prod.py"
+        "/Users/YOUR_USER/tools/iOS-GraphRAG/server_prod.py"
       ],
       "env": {
-        "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/ios-architect/knowledge-graph.sqlite"
+        "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
       }
     }
   }
@@ -74,11 +74,11 @@ Add this to your VS Code `settings.json`:
 
 ```json
 "github.copilot.chat.mcp.servers": {
-    "ios-architect": {
-        "command": "/Users/YOUR_USER/tools/ios-architect/.venv/bin/python",
-        "args": ["/Users/YOUR_USER/tools/ios-architect/server_prod.py"],
+    "iOS-GraphRAG": {
+        "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
+        "args": ["/Users/YOUR_USER/tools/iOS-GraphRAG/server_prod.py"],
         "env": {
-            "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/ios-architect/knowledge-graph.sqlite"
+            "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
         }
     }
 }
@@ -90,8 +90,8 @@ Before using it in chat, verify the toolchain with the MCP Inspector:
 
 ```bash
 npx @modelcontextprotocol/inspector \
-  /Users/YOUR_USER/tools/ios-architect/.venv/bin/python \
-  /Users/YOUR_USER/tools/ios-architect/server_prod.py
+  /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python \
+  /Users/YOUR_USER/tools/iOS-GraphRAG/server_prod.py
 ```
 
 1. Select the `trace_dependencies` tool.
