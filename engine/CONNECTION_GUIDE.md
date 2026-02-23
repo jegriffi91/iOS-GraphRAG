@@ -1,15 +1,11 @@
-# Setup Guide: The "Last Mile" Connection
-
-The SQLite database is inert on its own. The MCP Server (your Python script) is the bridge. You must "register" this script in your AI client's configuration file.
+# iOS-GraphRAG: Setup Guide
 
 > [!IMPORTANT]
-> **This is a `stdio`-based MCP server.** You do NOT need to run a background process. The AI client (Copilot CLI, Claude Desktop, VS Code) spawns the Python process automatically when it starts and manages its lifecycle. Your job is just to point the config at the right Python binary and database file.
+> **This is a `stdio` MCP server.** You do NOT run it yourself. Your AI client spawns and kills the process automatically. You just point a config file at two paths: (1) the Python binary, (2) the database file.
 
 ---
 
-## Step 0: Install uv (If needed)
-
-We use `uv` for high-performance Python package management.
+## Step 0 — Install `uv`
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -17,81 +13,73 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Step 1: Environment Setup
-
-1. **Create a tools directory:**
-   ```bash
-   mkdir -p ~/tools/iOS-GraphRAG
-   cd ~/tools/iOS-GraphRAG
-   ```
-
-2. **Initialize Environment:**
-   ```bash
-   uv init
-   uv venv --python 3.11
-   source .venv/bin/activate
-   ```
-
-3. **Install Dependencies:**
-   > [!IMPORTANT]
-   > For M3 Max/Apple Silicon, we install a specific PyTorch build first to ensure clean MPS (Metal Performance Shaders) support.
-
-   ```bash
-   # Install PyTorch (Standard PyPI wheels include MPS support for Mac)
-   uv pip install torch torchvision
-
-   # Install MCP and Tooling
-   uv pip install "mcp[cli]" tree-sitter tree-sitter-swift tree-sitter-objc networkx numpy sentence-transformers tqdm
-   ```
-
----
-
-## Step 2: Build the Graph
-
-Run the indexer pointing to your iOS repository:
+## Step 1 — Create the Python Environment
 
 ```bash
-GRAPH_DB_PATH=/absolute/path/to/output/knowledge-graph.sqlite \
-  uv run indexer_prod.py --repo /path/to/your/ios-project
-```
+mkdir -p ~/tools/iOS-GraphRAG && cd ~/tools/iOS-GraphRAG
 
-**Result:** A `knowledge-graph.sqlite` file will be created. Note its **absolute path** — you'll need it for Step 3.
+uv init
+uv venv --python 3.11
+source .venv/bin/activate
+
+# PyTorch first (includes MPS/Metal support on Apple Silicon)
+uv pip install torch torchvision
+
+# Everything else
+uv pip install "mcp[cli]" tree-sitter tree-sitter-swift tree-sitter-objc \
+  networkx numpy sentence-transformers tqdm
+```
 
 ---
 
-## Step 3: Register the Server
+## Step 2 — Build the Graph
 
-The config always needs two absolute paths:
-- **Python binary:** the `.venv/bin/python` inside your tools directory
-- **SQLite database:** the `knowledge-graph.sqlite` file built in Step 2
+```bash
+GRAPH_DB_PATH=/absolute/path/to/knowledge-graph.sqlite \
+  uv run indexer.py --repo /path/to/your/ios-project
+```
 
-### Option A: GitHub Copilot CLI
+This creates `knowledge-graph.sqlite`. **Write down its absolute path** — you need it next.
 
-Add to `~/.config/gh-copilot/config.yml` (or wherever `gh copilot` reads its MCP config):
+---
+
+## Step 3 — Register the Server
+
+Every config needs exactly **two absolute paths**. Replace `YOUR_USER` with your macOS username.
+
+| Path | Value |
+|---|---|
+| **Python binary** | `/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python` |
+| **Database file** | `/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite` |
+
+> [!CAUTION]
+> **All paths MUST be absolute.** No `~`, no `$HOME`, no relative paths. Every client silently fails on anything but a full `/Users/…` path.
+
+Pick your client below and paste the config:
+
+### GitHub Copilot CLI
+
+File: `~/.config/gh-copilot/config.yml`
 
 ```yaml
-# ~/.config/gh-copilot/config.yml
 mcp_servers:
   iOS-GraphRAG:
     command: /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python
     args:
-      - /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server_prod.py
+      - /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py
     env:
       GRAPH_DB_PATH: /Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite
 ```
 
-> [!NOTE]
-> GitHub Copilot CLI uses **stdio transport** — the Python process is spawned and killed automatically by `gh copilot`. You do not run a background server.
+### GitHub Copilot in VS Code
 
-### Option B: GitHub Copilot in VS Code
-
-Add to your VS Code `settings.json` (open via ⌘+Shift+P → "Open User Settings JSON"):
+Open via **⌘+Shift+P → "Open User Settings JSON"** and add:
 
 ```json
 "github.copilot.chat.mcp.servers": {
     "iOS-GraphRAG": {
         "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
-        "args": ["/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server_prod.py"],
+        "args": ["/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py"],
         "env": {
             "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
         }
@@ -99,9 +87,9 @@ Add to your VS Code `settings.json` (open via ⌘+Shift+P → "Open User Setting
 }
 ```
 
-### Option C: Claude Desktop
+### Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -109,7 +97,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "iOS-GraphRAG": {
       "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
       "args": [
-        "/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server_prod.py"
+        "/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py"
       ],
       "env": {
         "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
@@ -121,19 +109,17 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ---
 
-## Step 4: Verification
-
-Before using it in chat, verify the toolchain with the MCP Inspector:
+## Step 4 — Verify It Works
 
 ```bash
 npx @modelcontextprotocol/inspector \
   /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python \
-  /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server_prod.py
+  /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py
 ```
 
-1. Select the `trace_dependencies` tool.
-2. Enter a known file path.
-3. If you see valid JSON architecture data, you're ready.
+1. Click the `trace_dependencies` tool.
+2. Enter any file path from your iOS project.
+3. **See valid JSON?** You're done. 🎉
 
 ---
 
@@ -141,49 +127,47 @@ npx @modelcontextprotocol/inspector \
 
 ### "Cannot send a request, as the client has been closed"
 
-This is the most common error when setting up on a new machine. It means the **server Python process crashed during startup** before it could complete the MCP stdio handshake. The Copilot CLI sees a dead process and reports "client closed."
-
-**How to diagnose:** After the first failed attempt, check the log file the server writes alongside the database:
+**Translation:** the Python process crashed before it could say hello. Check the log:
 
 ```bash
-cat /path/to/your/knowledge-graph-directory/server_prod.log
+cat /path/to/your/knowledge-graph-directory/server.log
 ```
 
-Common causes and fixes:
+| What the log says | What you did wrong | Fix |
+|---|---|---|
+| `FATAL: knowledge-graph.sqlite not found` | `GRAPH_DB_PATH` is wrong or missing | Use the **absolute** path to the `.sqlite` file |
+| `ModuleNotFoundError: No module named 'mcp'` | `command` points to system Python | Change it to `.venv/bin/python` |
+| `no such table: nodes` | DB is corrupt or wrong file | Re-run `indexer.py` |
+| SSL / `certificate verify failed` | Corporate proxy blocking downloads | See **Enterprise SSL** below |
 
-| Symptom in log | Fix |
+### Enterprise SSL (Corporate Proxy)
+
+`sentence_transformers` needs to download a model. If your corporate proxy blocks it:
+
+1. **On a home machine** (no proxy), cache the model:
+   ```bash
+   python -c "
+   from sentence_transformers import SentenceTransformer
+   SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True)
+   print('Cached.')
+   "
+   ```
+2. **Copy** the cache folder to your work machine.
+3. **Add** `SENTENCE_TRANSFORMERS_HOME` to your config's `env`:
+   ```json
+   "env": {
+       "GRAPH_DB_PATH": "/absolute/path/to/knowledge-graph.sqlite",
+       "SENTENCE_TRANSFORMERS_HOME": "/absolute/path/to/model/cache"
+   }
+   ```
+
+> [!TIP]
+> No proxy workaround needed for `trace_dependencies` or `read_symbol` — only `semantic_search` uses the model. Skip the model download entirely if you don't need semantic search.
+
+### Quick Fixes
+
+| Problem | Fix |
 |---|---|
-| `FATAL: knowledge-graph.sqlite not found` | The `GRAPH_DB_PATH` env var is missing or wrong in your config. Use the **absolute path** to the `.sqlite` file. |
-| `ModuleNotFoundError: No module named 'mcp'` | The `command` in your config points to the wrong Python. It must point to `.venv/bin/python`, not the system Python. |
-| `SQLite error: no such table: nodes` | The DB path points to a different/corrupt file. Re-run `indexer_prod.py`. |
-| SSL errors / `certificate verify failed` | See "Enterprise SSL" section below. |
-
-### Enterprise SSL (Work PC / Corporate Proxy)
-
-On a work machine with a corporate SSL proxy, `sentence_transformers` may fail downloading model weights. The fix is to **pre-download the model at home** and point the server at a local cache:
-
-```bash
-# Run once (on a machine without proxy):
-python -c "
-from sentence_transformers import SentenceTransformer
-SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True)
-print('Model cached.')
-"
-```
-
-Then copy the model cache to your work machine and set the environment variable:
-
-```json
-"env": {
-    "GRAPH_DB_PATH": "/absolute/path/to/knowledge-graph.sqlite",
-    "SENTENCE_TRANSFORMERS_HOME": "/absolute/path/to/model/cache"
-}
-```
-
-Alternatively, `server_prod.py` already calls `ensure_model()` lazily (only on first `semantic_search` call), so if you avoid that tool on first run, the server will start and the other tools (`trace_dependencies`, `read_symbol`) will work without any model.
-
-### Other Issues
-
-- **Stale Data:** If you do a massive refactor, re-run `indexer_prod.py` to refresh the graph.
-- **MPS Not Detected:** Ensure you followed the specific PyTorch install step in Step 1.
-- **Wrong Python version:** The server requires Python 3.11+. Verify with `/path/to/.venv/bin/python --version`.
+| Stale data after a big refactor | Re-run `indexer.py` |
+| MPS (Metal) not detected | Reinstall PyTorch per Step 1 |
+| Wrong Python version | Server needs 3.11+. Check: `.venv/bin/python --version` |

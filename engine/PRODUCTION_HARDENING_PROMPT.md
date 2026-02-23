@@ -572,8 +572,8 @@ CREATE INDEX idx_edges_type ON edges(edge_type);
 
 Provide the following production-ready files:
 
-1. **`indexer_prod.py`** — The Harvester + Weaver implementation
-2. **`server_prod.py`** — The MCP server with all tools
+1. **`indexer.py`** — The Harvester + Weaver implementation
+2. **`server.py`** — The MCP server with all tools
 3. **`schema.sql`** — Complete database schema
 4. **`pyproject.toml`** — Dependencies with pinned versions
 5. **`PARSER_LIMITATIONS.md`** — Known tree-sitter-swift parse failures

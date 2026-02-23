@@ -42,7 +42,7 @@ def indexed_db_path() -> Generator[Path, None, None]:
     env["GRAPH_DB_PATH"] = str(TEST_DB_PATH)
     
     # Run the indexer on the test fixtures
-    indexer_script = CORE_DIR / "indexer_prod.py"
+    indexer_script = CORE_DIR / "indexer.py"
     result = subprocess.run(
         [
             sys.executable,

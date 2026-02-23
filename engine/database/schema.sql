@@ -1,5 +1,5 @@
 -- Production Schema for iOS-GraphRAG (Enterprise Edition)
--- This schema MUST match the columns used by indexer_prod.py
+-- This schema MUST match the columns used by indexer.py
 
 CREATE TABLE IF NOT EXISTS file_hashes (
     path TEXT PRIMARY KEY,
