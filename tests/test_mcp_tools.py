@@ -148,10 +148,9 @@ class TestTraceDependencies:
         from ios_graphrag import server
 
         # The handler's extensions sub-query reads ``GRAPH_DB_PATH`` at
-        # call time. Point it at the test DB and clear module globals so
-        # we observe a clean load against the indexed fixture.
-        server.GRAPH.clear()
-        server.NODE_META.clear()
+        # call time. Point it at the test DB. ``load_graph`` resets module
+        # globals internally (Phase 4f made it idempotent for mtime reload),
+        # so we don't need manual GRAPH/NODE_META clearing here.
         with patch.dict(os.environ, {"GRAPH_DB_PATH": str(indexed_db_path)}):
             server.load_graph(str(indexed_db_path))
 
