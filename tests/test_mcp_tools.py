@@ -17,12 +17,11 @@ Approach: ``server.py`` keeps the graph in module-level globals
 under a ``GRAPH_DB_PATH`` env override so the handler's extension-map
 query also targets the indexed test database.
 """
+
 import os
 import sqlite3
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 
 class TestTraceDependencies:
@@ -55,8 +54,7 @@ class TestTraceDependencies:
 
         # Get all nodes in that file
         nodes = db_connection.execute(
-            "SELECT id, symbol_name FROM nodes WHERE file_path = ?",
-            (file_path,)
+            "SELECT id, symbol_name FROM nodes WHERE file_path = ?", (file_path,)
         ).fetchall()
         node_ids = [n["id"] for n in nodes]
 
@@ -65,11 +63,14 @@ class TestTraceDependencies:
         # and target_symbol points to its parent.
         assert node_ids, "ScientificCalculator file has no nodes"
         placeholders = ",".join("?" for _ in node_ids)
-        edge = db_connection.execute(f"""
+        edge = db_connection.execute(
+            f"""
             SELECT e.target_symbol FROM edges e
             WHERE e.source_node_id IN ({placeholders})
             AND e.edge_type = 'INHERITS'
-        """, node_ids).fetchone()
+        """,
+            node_ids,
+        ).fetchone()
 
         assert edge is not None, "No INHERITS edge from ScientificCalculator"
         # Calculator is what ScientificCalculator depends on => upstream.
@@ -92,12 +93,15 @@ class TestTraceDependencies:
 
         # New semantics: downstream of Operation = inbound CONFORMS edges
         # i.e. edges where target_node_id == Operation.id (things that depend on it).
-        edges = db_connection.execute("""
+        edges = db_connection.execute(
+            """
             SELECT src.symbol_name FROM edges e
             JOIN nodes src ON e.source_node_id = src.id
             WHERE e.target_node_id = ?
             AND e.edge_type = 'CONFORMS'
-        """, (operation_id,)).fetchall()
+        """,
+            (operation_id,),
+        ).fetchall()
 
         conformers = [e["symbol_name"] for e in edges]
         expected = ["Addition", "Subtraction", "Multiplication", "Division"]
@@ -151,10 +155,7 @@ class TestTraceDependencies:
         with patch.dict(os.environ, {"GRAPH_DB_PATH": str(indexed_db_path)}):
             server.load_graph(str(indexed_db_path))
 
-            calc_path = (
-                test_fixtures_path
-                / "Sources" / "CalculatorApp" / "Calculator.swift"
-            )
+            calc_path = test_fixtures_path / "Sources" / "CalculatorApp" / "Calculator.swift"
             result = server._trace_dependencies(file_path=str(calc_path))
 
         # Shape assertions
@@ -167,9 +168,9 @@ class TestTraceDependencies:
         # — the canonical orientation check. If predecessors/successors get
         # swapped, this would land in `upstream` instead.
         downstream_inherits = [
-            e for e in result["downstream"]
-            if e.get("edge_type") == "INHERITS"
-            and e.get("symbol") == "ScientificCalculator"
+            e
+            for e in result["downstream"]
+            if e.get("edge_type") == "INHERITS" and e.get("symbol") == "ScientificCalculator"
         ]
         assert downstream_inherits, (
             "ScientificCalculator (subclass) missing from Calculator's "
@@ -183,9 +184,7 @@ class TestTraceDependencies:
         # the smaller-(file_path, start_byte) candidate among the
         # `calculate(_:_:operation:)` overloads).
         downstream_files = {e.get("path") for e in result["downstream"]}
-        engine_path = str(
-            test_fixtures_path / "Sources" / "CalculatorApp" / "Engine.swift"
-        )
+        engine_path = str(test_fixtures_path / "Sources" / "CalculatorApp" / "Engine.swift")
         assert engine_path in downstream_files, (
             "Engine.swift missing from downstream of Calculator.swift. "
             f"Got downstream paths: {downstream_files!r}"
@@ -204,24 +203,24 @@ class TestTraceDependencies:
 
 class TestEmbeddings:
     """Tests for embeddings/semantic search setup."""
-    
+
     def test_embeddings_exist(self, db_connection: sqlite3.Connection):
         """Verify embeddings were created during indexing."""
-        count = db_connection.execute(
-            "SELECT COUNT(*) as cnt FROM node_embeddings"
-        ).fetchone()["cnt"]
-        
+        count = db_connection.execute("SELECT COUNT(*) as cnt FROM node_embeddings").fetchone()[
+            "cnt"
+        ]
+
         assert count > 0, "No embeddings found in node_embeddings table"
-    
+
     def test_embedding_size_consistent(self, db_connection: sqlite3.Connection):
         """Verify all embeddings have the same size."""
         rows = db_connection.execute(
             "SELECT LENGTH(embedding) as size FROM node_embeddings LIMIT 10"
         ).fetchall()
-        
+
         sizes = [r["size"] for r in rows]
         assert len(set(sizes)) == 1, f"Inconsistent embedding sizes: {set(sizes)}"
-    
+
     def test_all_nodes_have_embeddings(self, db_connection: sqlite3.Connection):
         """Verify all nodes have embeddings."""
         missing = db_connection.execute("""
@@ -229,18 +228,20 @@ class TestEmbeddings:
             LEFT JOIN node_embeddings e ON n.id = e.node_id
             WHERE e.node_id IS NULL
         """).fetchall()
-        
+
         # Some nodes might not have embeddings (like extensions without meaningful signatures)
         # But the main symbols should have them
         missing_names = [m["symbol_name"] for m in missing]
         important_missing = [n for n in missing_names if n in ["Calculator", "Operation", "Engine"]]
-        
-        assert len(important_missing) == 0, f"Important symbols missing embeddings: {important_missing}"
+
+        assert len(important_missing) == 0, (
+            f"Important symbols missing embeddings: {important_missing}"
+        )
 
 
 class TestReadSymbol:
     """Tests for read_symbol functionality."""
-    
+
     def test_byte_ranges_readable(
         self, db_connection: sqlite3.Connection, test_fixtures_path: Path
     ):
@@ -250,21 +251,21 @@ class TestReadSymbol:
             SELECT file_path, start_byte, end_byte, symbol_name
             FROM nodes WHERE symbol_type = 'function' LIMIT 1
         """).fetchone()
-        
+
         assert row is not None
-        
+
         file_path = row["file_path"]
         start_byte = row["start_byte"]
         end_byte = row["end_byte"]
         symbol_name = row["symbol_name"]
-        
+
         # Read the bytes
         with open(file_path, "rb") as f:
             f.seek(start_byte)
             content = f.read(end_byte - start_byte)
-        
+
         code = content.decode("utf-8")
-        
+
         # The code should contain the function name
         assert symbol_name in code or "func" in code, (
             f"Read content doesn't look like a function: {code[:100]}..."

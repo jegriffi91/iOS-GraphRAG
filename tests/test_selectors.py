@@ -15,11 +15,12 @@ was reshaped to make this testable; we use the function as-is.
 A small set of mirror cases for ``extract_call_selector`` is included at
 the bottom for symmetry with the declaration-side coverage.
 """
+
 from __future__ import annotations
 
 import pytest
-from tree_sitter import Language, Parser
 import tree_sitter_swift
+from tree_sitter import Language, Parser
 
 from ios_graphrag.indexer import build_swift_selector, extract_call_selector
 
@@ -99,8 +100,7 @@ def test_build_swift_selector(swift_parser: Parser, source: str, expected: str):
 
     selector = build_swift_selector(func_node)
     assert selector == expected, (
-        f"build_swift_selector returned {selector!r} for {source!r}; "
-        f"expected {expected!r}"
+        f"build_swift_selector returned {selector!r} for {source!r}; expected {expected!r}"
     )
 
 
@@ -156,6 +156,5 @@ def test_extract_call_selector(swift_parser: Parser, call_src: str, expected: st
 
     selector = extract_call_selector(call_node)
     assert selector == expected, (
-        f"extract_call_selector returned {selector!r} for {call_src!r}; "
-        f"expected {expected!r}"
+        f"extract_call_selector returned {selector!r} for {call_src!r}; expected {expected!r}"
     )

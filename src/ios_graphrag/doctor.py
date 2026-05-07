@@ -9,6 +9,7 @@ This script never imports torch/sentence-transformers eagerly — checks
 that need them are wrapped in try/except so a broken env still yields
 a useful report instead of an ImportError stack trace.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,6 @@ import re
 import sqlite3
 import subprocess
 import sys
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -177,9 +177,7 @@ def diagnose_schema_version() -> Diagnosis:
                     "after that ships. Today's DBs are forward-compatible."
                 ),
             )
-        ver_row = conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        ).fetchone()
+        ver_row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         ver = ver_row[0] if ver_row else None
         if ver is None:
             return Diagnosis(
@@ -228,8 +226,7 @@ def diagnose_model_cache() -> Diagnosis:
     # Sentence-transformers expects either model.safetensors or pytorch_model.bin.
     snapshot = snapshot_dirs[0]
     has_weights = any(
-        (snapshot / candidate).exists()
-        for candidate in ("model.safetensors", "pytorch_model.bin")
+        (snapshot / candidate).exists() for candidate in ("model.safetensors", "pytorch_model.bin")
     )
     if not has_weights:
         # The lock files in HF cache are written during in-flight downloads.
@@ -268,8 +265,7 @@ def diagnose_graph_db_path_env() -> Diagnosis:
             check="GRAPH_DB_PATH env var",
             details=f"set to {env} but file does not exist",
             remediation=(
-                "Either build the index at that path or unset GRAPH_DB_PATH "
-                "to use the default."
+                "Either build the index at that path or unset GRAPH_DB_PATH to use the default."
             ),
         )
     if not os.access(expanded, os.R_OK):
@@ -724,9 +720,7 @@ def render_integrity_report(result: dict) -> str:
     lines.append("")
 
     if orphans == 0:
-        lines.append(
-            f"[OK]       No orphan edges ({resolved} resolved, 0 dangling)."
-        )
+        lines.append(f"[OK]       No orphan edges ({resolved} resolved, 0 dangling).")
     else:
         lines.append(
             f"[WARNING]  {orphans} orphan edge(s) detected "
@@ -737,10 +731,7 @@ def render_integrity_report(result: dict) -> str:
     if not missing:
         lines.append("[OK]       All node file_path entries exist on disk.")
     else:
-        lines.append(
-            f"[WARNING]  {len(missing)} file path(s) in nodes are no "
-            "longer on disk:"
-        )
+        lines.append(f"[WARNING]  {len(missing)} file path(s) in nodes are no longer on disk:")
         for path in missing[:10]:
             lines.append(f"  {_redact_home(path)}")
         if len(missing) > 10:
@@ -787,10 +778,7 @@ def run_verify(argv_db: Optional[str] = None) -> int:
 
     print(render_integrity_report(result))
 
-    has_warning = (
-        int(result.get("orphan_edges", 0) or 0) > 0
-        or bool(result.get("missing_files"))
-    )
+    has_warning = int(result.get("orphan_edges", 0) or 0) > 0 or bool(result.get("missing_files"))
     return 1 if has_warning else 0
 
 

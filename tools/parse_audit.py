@@ -42,15 +42,15 @@ import os
 import platform
 import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
-from dataclasses import asdict, dataclass, field
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from tree_sitter import Language, Parser
 import tree_sitter_objc
 import tree_sitter_swift
-
+from tree_sitter import Language, Parser
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -301,7 +301,8 @@ def aggregate(results: List[FileResult], top_n: int = 20) -> Dict:
 
     # Top-N error-prone files: sort by error_node_count desc, then size desc.
     errored = [
-        r for r in results
+        r
+        for r in results
         if not r.timeout and (r.error_node_count > 0 or r.has_error or r.missing_node_count > 0)
     ]
     errored.sort(key=lambda r: (r.error_node_count, r.size_bytes), reverse=True)
@@ -345,7 +346,10 @@ def _orchestrator_sha() -> str:
     try:
         out = subprocess.run(
             ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, check=True, timeout=10,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
         )
         return out.stdout.strip()
     except Exception:

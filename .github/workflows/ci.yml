@@ -1,0 +1,54 @@
+# PR + push CI for iOS-GraphRAG.
+#
+# Per spec (Phase 6e):
+#   * runs on every PR to main and every push to main
+#   * macOS runner (the project targets Apple Silicon / macOS)
+#   * Python 3.11 + 3.12 matrix (pyproject.toml requires-python >= 3.11)
+#   * ruff lint + format check
+#   * pytest tests/
+#   * ios-graphrag-preflight --smoke
+#
+# The full ios-graphrag-preflight (no flag) is intentionally NOT run here:
+# it triggers a ~500MB nomic-embed-text-v1.5 download on cold cache, plus
+# spawns the indexer subprocess + sentence-transformers model load. That's
+# both slow and flaky for CI. The owner runs the full preflight on a fresh
+# machine; CI only verifies the offline checks.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install deps
+        run: uv sync --all-extras --dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        run: uv run pytest tests/ -v
+
+      - name: Preflight smoke
+        run: uv run ios-graphrag-preflight --smoke

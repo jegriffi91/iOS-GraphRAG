@@ -1,0 +1,47 @@
+# Nightly benchmark for iOS-GraphRAG.
+#
+# Runs benchmarks/run.py on the checked-in CalculatorApp test fixture and
+# uploads the resulting JSON as a build artifact (90-day retention).
+# Schedule: 11:00 UTC daily (~04:00 US Pacific, late-evening for EU teams).
+#
+# NOTE: the spec calls for a >10% regression check on full reindex and a
+# >20% regression on semantic_search p99 — that requires a baseline JSON
+# that hasn't been established yet. Phase 4a is owner-empirical and the
+# real baseline is collected on the project owner's hardware against a
+# real iOS repo, not the tiny CalculatorApp fixture. Until that lands,
+# this workflow only collects + archives nightly numbers; a follow-up
+# commit can drop in `benchmarks/baseline.json` plus a comparison step.
+name: Nightly Benchmark
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 11:00 UTC daily
+  workflow_dispatch: {}    # allow manual trigger from the Actions tab
+
+jobs:
+  benchmark:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install deps
+        run: uv sync --all-extras --dev
+
+      - name: Run benchmark
+        run: |
+          uv run python benchmarks/run.py \
+            --repo test_fixtures/CalculatorApp \
+            --output benchmarks/results/
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.sha }}-${{ github.run_id }}
+          path: benchmarks/results/*.json
+          retention-days: 90

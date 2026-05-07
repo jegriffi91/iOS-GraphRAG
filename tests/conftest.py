@@ -6,6 +6,7 @@ Provides:
 - Database connection fixture
 - Path constants for test fixtures
 """
+
 import os
 import sqlite3
 import subprocess
@@ -50,22 +51,25 @@ def indexed_db_path(tmp_path_factory) -> Generator[Path, None, None]:
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "ios_graphrag.indexer",
-            "--repo", str(TEST_FIXTURES_DIR),
-            "--db", str(TEST_DB_PATH),
-            "--full"
+            "-m",
+            "ios_graphrag.indexer",
+            "--repo",
+            str(TEST_FIXTURES_DIR),
+            "--db",
+            str(TEST_DB_PATH),
+            "--full",
         ],
         cwd=str(PROJECT_ROOT),
         env=env,
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
         pytest.fail(f"Indexer failed:\nstdout: {result.stdout}\nstderr: {result.stderr}")
-    
+
     yield TEST_DB_PATH
-    
+
     # Cleanup after all tests
     if TEST_DB_PATH.exists():
         TEST_DB_PATH.unlink()

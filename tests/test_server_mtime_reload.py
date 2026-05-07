@@ -12,12 +12,12 @@ the resulting DB into ``tmp_path`` so each test owns its own file (so
 mtime mutation doesn't leak across the session-scoped fixture), and then
 manipulate the mtime via ``os.utime``.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import shutil
-import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -66,10 +66,7 @@ def test_server_reloads_on_mtime_change(
             server._reload_if_stale()
 
     # The reload-triggered log line is the contract surface.
-    matching = [
-        rec for rec in caplog.records
-        if "Database mtime changed" in rec.getMessage()
-    ]
+    matching = [rec for rec in caplog.records if "Database mtime changed" in rec.getMessage()]
     assert matching, (
         f"expected 'Database mtime changed' INFO line, got "
         f"{[r.getMessage() for r in caplog.records]}"
@@ -104,12 +101,10 @@ def test_server_no_reload_when_mtime_unchanged(
 
     # No reload log line.
     reload_messages = [
-        rec for rec in caplog.records
-        if "Database mtime changed" in rec.getMessage()
+        rec for rec in caplog.records if "Database mtime changed" in rec.getMessage()
     ]
     assert not reload_messages, (
-        f"unexpected reload log on stable mtime: "
-        f"{[r.getMessage() for r in reload_messages]}"
+        f"unexpected reload log on stable mtime: {[r.getMessage() for r in reload_messages]}"
     )
 
     # ``GRAPH`` is the same object — ``load_graph`` was not invoked. We

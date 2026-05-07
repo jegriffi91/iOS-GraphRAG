@@ -1,20 +1,19 @@
 import argparse
 import functools
-import os
-import sys
-import sqlite3
 import logging
+import os
+import sqlite3
+import sys
 import time
 import traceback
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, Callable, Dict, List
-
-from pydantic import Field
+from typing import Annotated, Any, Callable, Dict
 
 import networkx as nx
 import numpy as np
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from sentence_transformers import SentenceTransformer
 
 from . import _diagnostics, _migrations, _tls
@@ -132,13 +131,14 @@ def _traced_handler(*, tool_name: str) -> Callable[[Callable[..., Any]], Callabl
 
     return decorate
 
+
 mcp = FastMCP("iOS-GraphRAG")
 
 GRAPH = nx.DiGraph()
 NODE_META: Dict[int, Dict[str, str]] = {}
 MODEL = None
-EMBEDDING_MATRIX = None   # np.ndarray [N, dim], L2-normalized
-EMBEDDING_IDS = []         # List[(id, path, name)] matching matrix rows
+EMBEDDING_MATRIX = None  # np.ndarray [N, dim], L2-normalized
+EMBEDDING_IDS = []  # List[(id, path, name)] matching matrix rows
 
 # Phase 4f.2: track DB mtime so each tool call can cheaply check whether the
 # indexer has rewritten the database underneath us. ``_LOADED_MTIME`` is
@@ -179,8 +179,7 @@ def _check_schema_version_or_exit(db_path: str) -> None:
         sys.exit(1)
     if db_v > code_v:
         log.error(
-            "Database at v%d, server only knows up to v%d. "
-            "Upgrade ios-graphrag.",
+            "Database at v%d, server only knows up to v%d. Upgrade ios-graphrag.",
             db_v,
             code_v,
         )
@@ -290,7 +289,12 @@ def ensure_model() -> SentenceTransformer:
 )
 @_traced_handler(tool_name="swift_dependency_tracer")
 def _trace_dependencies(
-    file_path: Annotated[str, Field(description="Absolute path to the Swift/ObjC file. Use paths from global_codebase_search results.")],
+    file_path: Annotated[
+        str,
+        Field(
+            description="Absolute path to the Swift/ObjC file. Use paths from global_codebase_search results."
+        ),
+    ],
 ) -> dict:
     _reload_if_stale()
     nodes = [n for n, data in GRAPH.nodes(data=True) if data.get("path") == file_path]
@@ -355,7 +359,7 @@ def _trace_dependencies(
     name="objc_swift_bridge_finder",
     description=(
         "Cross-language mapper. Finds all Swift classes inheriting from Objective-C (bridging headers). "
-        "Avoid using grep \"@objc\" or regex for this. Regular expressions cannot parse Swift syntax trees and will miss implicit inheritance chains. "
+        'Avoid using grep "@objc" or regex for this. Regular expressions cannot parse Swift syntax trees and will miss implicit inheritance chains. '
         "Returns a complete, structured JSON graph."
     ),
 )
@@ -410,9 +414,21 @@ def _find_bridging_header_usage() -> dict:
 )
 @_traced_handler(tool_name="read_symbol_source")
 def _read_symbol(
-    file_path: Annotated[str, Field(description="Absolute file path from search or tracer results.")],
-    start_byte: Annotated[int, Field(description="Start byte offset from global_codebase_search results. Do not guess.", ge=0)],
-    end_byte: Annotated[int, Field(description="End byte offset from global_codebase_search results. Do not guess.", ge=0)],
+    file_path: Annotated[
+        str, Field(description="Absolute file path from search or tracer results.")
+    ],
+    start_byte: Annotated[
+        int,
+        Field(
+            description="Start byte offset from global_codebase_search results. Do not guess.", ge=0
+        ),
+    ],
+    end_byte: Annotated[
+        int,
+        Field(
+            description="End byte offset from global_codebase_search results. Do not guess.", ge=0
+        ),
+    ],
 ) -> dict:
     _reload_if_stale()
     try:
@@ -445,12 +461,21 @@ def _read_symbol(
 )
 @_traced_handler(tool_name="global_codebase_search")
 def _semantic_search(
-    query: Annotated[str, Field(description="Natural language concept or exact class/function name. Do not pass regex, glob patterns, or raw bash syntax.")],
+    query: Annotated[
+        str,
+        Field(
+            description="Natural language concept or exact class/function name. Do not pass regex, glob patterns, or raw bash syntax."
+        ),
+    ],
     top_k: Annotated[int, Field(description="Number of results to return.", ge=1, le=50)] = 10,
 ) -> dict:
     _reload_if_stale()
     if EMBEDDING_MATRIX is None or len(EMBEDDING_IDS) == 0:
-        return {"query": query, "results": [], "error": "No embeddings loaded. Re-index with indexer.py."}
+        return {
+            "query": query,
+            "results": [],
+            "error": "No embeddings loaded. Re-index with indexer.py.",
+        }
 
     model = ensure_model()
     q_vec = model.encode([query], convert_to_numpy=True)[0]
@@ -506,6 +531,7 @@ def main() -> None:
     # returns the path of the file handler so we can log it (handy for
     # support-ticket triage).
     from ._logging import setup_logging
+
     log_file = setup_logging("server")
 
     # Phase 6d.2: install the crashdump excepthook AFTER logging is wired
@@ -523,7 +549,7 @@ def main() -> None:
 
     try:
         db_path = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
-        log.info(f"Starting iOS-GraphRAG MCP server")
+        log.info("Starting iOS-GraphRAG MCP server")
         log.info(f"Python: {sys.executable}")
         log.info(f"DB path: {db_path}")
         log.info(f"DB exists: {Path(db_path).exists()}")
@@ -558,4 +584,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

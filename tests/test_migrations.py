@@ -14,6 +14,7 @@ Coverage:
 5. Server: mismatched schema_version causes the binary to exit 1
    with a clear remediation message, before ``mcp.run()`` blocks.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,7 +25,6 @@ from pathlib import Path
 import pytest
 
 from ios_graphrag import _migrations
-
 
 # Pre-Phase-6a schema. Used by test_apply_migrations_to_legacy_db to
 # build a DB that simulates one created by an older ios-graphrag build:
@@ -98,14 +98,10 @@ def test_apply_migrations_to_fresh_db():
         assert _migrations.current_version(conn) == latest
 
         cols = _node_columns(conn)
-        assert SWIFTUI_COLUMNS <= cols, (
-            f"missing SwiftUI columns; got {sorted(cols)}"
-        )
+        assert SWIFTUI_COLUMNS <= cols, f"missing SwiftUI columns; got {sorted(cols)}"
 
         # Every migration must stamp its version into schema_version.
-        rows = conn.execute(
-            "SELECT version FROM schema_version ORDER BY version"
-        ).fetchall()
+        rows = conn.execute("SELECT version FROM schema_version ORDER BY version").fetchall()
         assert [r[0] for r in rows] == list(range(1, latest + 1))
     finally:
         conn.close()
@@ -126,9 +122,7 @@ def test_apply_migrations_to_legacy_db():
         conn.executescript(_LEGACY_SCHEMA_SQL)
         # Sanity: legacy DB has nodes/edges but no schema_version.
         tables = {
-            row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         assert "nodes" in tables
         assert "edges" in tables
@@ -171,19 +165,13 @@ def test_idempotent_application():
     try:
         latest = _migrations.max_known_version()
         v1 = _migrations.apply_migrations(conn)
-        rows1 = conn.execute(
-            "SELECT version FROM schema_version ORDER BY version"
-        ).fetchall()
+        rows1 = conn.execute("SELECT version FROM schema_version ORDER BY version").fetchall()
 
         v2 = _migrations.apply_migrations(conn)
-        rows2 = conn.execute(
-            "SELECT version FROM schema_version ORDER BY version"
-        ).fetchall()
+        rows2 = conn.execute("SELECT version FROM schema_version ORDER BY version").fetchall()
 
         assert v1 == v2 == latest
-        assert rows1 == rows2, (
-            "second apply_migrations must not re-stamp version rows"
-        )
+        assert rows1 == rows2, "second apply_migrations must not re-stamp version rows"
     finally:
         conn.close()
 

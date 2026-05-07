@@ -7,16 +7,13 @@ Coverage:
 2. With ``GRAPHRAG_LOG_DIR`` pointing at an empty tmpdir, both files
    produce the friendly "(no log file at ...)" stub instead of crashing.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
-
-import pytest
-
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -74,8 +71,7 @@ def test_tail_errors_from_indexer_log(tmp_path: Path):
         timeout=120,
     )
     assert result.returncode == 0, (
-        f"doctor rc={result.returncode}\nstdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
+        f"doctor rc={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
     out = result.stdout

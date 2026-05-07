@@ -12,13 +12,12 @@ The previous implementation peppered ``print()`` calls through
 through the ``logging`` module on stderr. This test runs the indexer
 as a subprocess and asserts ``stdout`` stays empty.
 """
+
 from __future__ import annotations
 
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 # Path to the fixture project under test. Mirrors ``conftest.TEST_FIXTURES_DIR``
 # but recomputed locally because ``tests/`` is not a Python package
@@ -42,15 +41,19 @@ def test_indexer_stdout_is_empty(tmp_path: Path):
     project_root = Path(__file__).parent.parent
 
     import os as _os
+
     env = _os.environ.copy()
     env["GRAPHRAG_LOG_DIR"] = str(tmp_path / "logs")
 
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "ios_graphrag.indexer",
-            "--repo", str(_TEST_FIXTURES_DIR),
-            "--db", str(tmp_db),
+            "-m",
+            "ios_graphrag.indexer",
+            "--repo",
+            str(_TEST_FIXTURES_DIR),
+            "--db",
+            str(tmp_db),
             "--full",
         ],
         cwd=str(project_root),

@@ -13,16 +13,16 @@ from dataclasses import dataclass
 # verification — kept here because it predates the Phase 2 audit and removing
 # it could regress download paths in environments that disable httpx for
 # unrelated reasons. Move to _tls.py only if it ever needs to be opt-in.
-os.environ.setdefault('HF_HUB_DISABLE_HTTPX', '1')
+os.environ.setdefault("HF_HUB_DISABLE_HTTPX", "1")
 
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
-from tree_sitter import Language, Parser
 import tree_sitter_objc
 import tree_sitter_swift
+from sentence_transformers import SentenceTransformer
+from tree_sitter import Language, Parser
 
 from . import _migrations, _tls
 
@@ -89,15 +89,12 @@ def _resolve_model_path() -> str:
         )
 
     if _has_model_weights(DEFAULT_LOCAL_MODEL_DIR):
-        log.info(
-            f"model loaded from local cache: {DEFAULT_LOCAL_MODEL_DIR}"
-        )
+        log.info(f"model loaded from local cache: {DEFAULT_LOCAL_MODEL_DIR}")
         return str(DEFAULT_LOCAL_MODEL_DIR)
 
-    log.info(
-        f"using HF identifier {MODEL_NAME!r} (HF hub cache or network download)"
-    )
+    log.info(f"using HF identifier {MODEL_NAME!r} (HF hub cache or network download)")
     return MODEL_NAME
+
 
 BLOCK_DIRS = {"Pods", "Carthage", "DerivedData", ".build", "vendor"}
 ALLOWED_EXTS = {".swift", ".h", ".m"}
@@ -311,9 +308,7 @@ def _extract_param_label(param_node) -> Optional[str]:
         # Wildcard label: accept either a node typed ``"_"`` (some grammar
         # versions) or a ``simple_identifier`` whose text is exactly ``"_"``
         # (other grammar versions).
-        if param_child.type == "_" or (
-            param_child.type == "simple_identifier" and text == "_"
-        ):
+        if param_child.type == "_" or (param_child.type == "simple_identifier" and text == "_"):
             identifier_tokens.append(("wildcard", "_"))
             continue
 
@@ -368,12 +363,12 @@ def build_swift_selector(func_node) -> Optional[str]:
 
 def extract_call_selector(call_node) -> Optional[str]:
     """Extract a Swift selector from a call_expression node.
-    
+
     Parses the call expression AST to build the selector from:
     - Function name from simple_identifier (for direct calls) or
       navigation_expression > navigation_suffix > simple_identifier (for method calls)
     - Argument labels from value_argument_label children, or '_' for unlabeled args
-    
+
     For example:
         test(something) -> "test(_:)" (unlabeled)
         test(something: value) -> "test(something:)"
@@ -381,12 +376,12 @@ def extract_call_selector(call_node) -> Optional[str]:
     """
     func_name = None
     arg_labels: List[str] = []
-    
+
     for child in call_node.children:
         # Get function name - direct call like: test()
         if child.type == "simple_identifier" and func_name is None:
             func_name = child.text.decode("utf-8", errors="ignore")
-        
+
         # Get function name - method call like: factory.createOperation()
         elif child.type == "navigation_expression" and func_name is None:
             for nav_child in child.children:
@@ -395,7 +390,7 @@ def extract_call_selector(call_node) -> Optional[str]:
                         if suffix_child.type == "simple_identifier":
                             func_name = suffix_child.text.decode("utf-8", errors="ignore")
                             break
-        
+
         # Get call suffix which contains arguments
         elif child.type == "call_suffix":
             for suffix_child in child.children:
@@ -409,19 +404,22 @@ def extract_call_selector(call_node) -> Optional[str]:
                                     # Get the label text
                                     for label_child in va_child.children:
                                         if label_child.type == "simple_identifier":
-                                            arg_labels.append(label_child.text.decode("utf-8", errors="ignore") + ":")
+                                            arg_labels.append(
+                                                label_child.text.decode("utf-8", errors="ignore")
+                                                + ":"
+                                            )
                                             has_label = True
                                             break
                             if not has_label:
                                 # Unlabeled argument uses _
                                 arg_labels.append("_:")
-    
+
     if not func_name:
         return None
-    
+
     if not arg_labels:
         return f"{func_name}()"
-    
+
     return f"{func_name}({''.join(arg_labels)})"
 
 
@@ -431,7 +429,7 @@ def normalize_type_name(name: str) -> str:
 
 def extract_inheritance_types(node, code_bytes: bytes) -> List[str]:
     """Extract inherited types from a declaration node.
-    
+
     Compatible with tree-sitter-swift grammars that use either:
     - inheritance_clause > type_identifier (older grammars)
     - inheritance_specifier > user_type > type_identifier (newer grammars)
@@ -445,7 +443,9 @@ def extract_inheritance_types(node, code_bytes: bytes) -> List[str]:
                 if sub.type == "user_type":
                     for inner in sub.children:
                         if inner.type == "type_identifier":
-                            types.append(normalize_type_name(inner.text.decode("utf-8", errors="ignore")))
+                            types.append(
+                                normalize_type_name(inner.text.decode("utf-8", errors="ignore"))
+                            )
                 elif sub.type == "type_identifier":
                     types.append(normalize_type_name(sub.text.decode("utf-8", errors="ignore")))
         # Handle older grammar: inheritance_clause
@@ -460,7 +460,7 @@ def extract_inheritance_types(node, code_bytes: bytes) -> List[str]:
 
 def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
     """Extract symbols from Swift code using manual tree walking.
-    
+
     This approach is more robust across different tree-sitter versions than using queries.
     """
     symbols: List[Symbol] = []
@@ -469,7 +469,7 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
     def walk_node(node):
         """Recursively walk the tree and extract symbols."""
         node_type = node.type
-        
+
         # Handle imports
         if node_type == "import_declaration":
             for child in node.children:
@@ -477,12 +477,12 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     imports.append(child.text.decode("utf-8", errors="ignore").split(".")[0])
                     break
             return  # Don't recurse into imports
-        
+
         # Handle class_declaration (which covers class, struct, enum, protocol, extension, actor)
         if node_type == "class_declaration":
             actual_type = None
             name_text = None
-            
+
             for child in node.children:
                 child_type = child.type
                 # Check for type keywords
@@ -497,14 +497,14 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         if inner.type == "type_identifier":
                             name_text = inner.text.decode("utf-8", errors="ignore")
                             break
-            
+
             if actual_type and name_text:
                 signature = extract_signature_line(code_bytes, node.start_byte)
                 line_number = node.start_point[0] + 1
                 inherits = []
                 conforms = []
                 extends = None
-                
+
                 # Extract inheritance/conformance
                 inheritance_types = extract_inheritance_types(node, code_bytes)
                 if actual_type == "class" and inheritance_types:
@@ -515,7 +515,7 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                 elif actual_type == "extension":
                     extends = name_text
                     conforms = inheritance_types
-                
+
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -538,7 +538,7 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     for inner in child.children:
                         walk_node(inner)
             return
-        
+
         # Handle protocol_declaration (tree-sitter-swift uses a separate node type for protocols)
         if node_type == "protocol_declaration":
             name_text = None
@@ -546,14 +546,14 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                 if child.type == "type_identifier":
                     name_text = child.text.decode("utf-8", errors="ignore")
                     break
-            
+
             if name_text:
                 signature = extract_signature_line(code_bytes, node.start_byte)
                 line_number = node.start_point[0] + 1
-                
+
                 # Extract conformance (protocols can inherit from other protocols)
                 conforms = extract_inheritance_types(node, code_bytes)
-                
+
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -571,7 +571,7 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     )
                 )
             return
-        
+
         # Handle function_declaration
         if node_type == "function_declaration":
             name_text = None
@@ -579,15 +579,15 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                 if child.type == "simple_identifier":
                     name_text = child.text.decode("utf-8", errors="ignore")
                     break
-            
+
             if name_text:
                 signature = extract_signature_line(code_bytes, node.start_byte)
                 line_number = node.start_point[0] + 1
                 selector = build_swift_selector(node)
-                
+
                 # Extract function calls using tree-sitter to get full selectors
                 calls: List[str] = []
-                
+
                 def extract_calls_from_node(n):
                     """Recursively find call_expression nodes and extract their selectors."""
                     if n.type == "call_expression":
@@ -597,12 +597,12 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                             calls.append(call_selector)
                     for child in n.children:
                         extract_calls_from_node(child)
-                
+
                 # Walk the function body to find all calls
                 for child in node.children:
                     if child.type == "function_body":
                         extract_calls_from_node(child)
-                
+
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -621,17 +621,15 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     )
                 )
             return
-        
+
         # Recurse into children
         for child in node.children:
             walk_node(child)
-    
+
     # Start walking from root
     walk_node(tree.root_node)
-    
+
     return symbols, sorted(set(imports))
-
-
 
 
 def extract_objc_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
@@ -787,6 +785,7 @@ def load_hashes(conn):
         # Table doesn't exist yet (Fresh DB), so return empty dict implies "Rebuild Everything"
         return {}
 
+
 def chunked(iterable: List[str], size: int) -> Iterable[List[str]]:
     for i in range(0, len(iterable), size):
         yield iterable[i : i + size]
@@ -815,6 +814,7 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     # ``setup_logging`` helper is idempotent: re-calling it from a worker
     # detaches any stale handlers and reattaches a clean pair.
     from ._logging import setup_logging as _setup_logging
+
     _setup_logging("indexer")
 
     _tls.configure_insecure_tls_if_requested()
@@ -831,13 +831,13 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     # staged the model under the package's own directory.
     if model_path == MODEL_NAME:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        local_models_dir = os.path.join(script_dir, '..', 'models')
+        local_models_dir = os.path.join(script_dir, "..", "models")
         if os.path.isdir(local_models_dir):
-            os.environ['HF_HOME'] = os.path.abspath(local_models_dir)
-            os.environ['HF_HUB_OFFLINE'] = '1'
-            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+            os.environ["HF_HOME"] = os.path.abspath(local_models_dir)
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-            snapshots_dir = os.path.join(local_models_dir, 'snapshots')
+            snapshots_dir = os.path.join(local_models_dir, "snapshots")
             if os.path.isdir(snapshots_dir):
                 snapshots = os.listdir(snapshots_dir)
                 if snapshots:
@@ -845,7 +845,6 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
                     log.info(f"model loaded from in-repo snapshot: {model_path}")
 
     # Re-import to ensure clean state in worker
-    from sentence_transformers import SentenceTransformer
     import torch
 
     model = SentenceTransformer(model_path, trust_remote_code=True)
@@ -867,11 +866,12 @@ def embed_signatures(signatures: List[str]) -> List[np.ndarray]:
     """Generate embeddings using a separate process to avoid httpx conflicts."""
     if not signatures:
         return []
-    
+
     import multiprocessing
+
     # Use 'spawn' context to create a truly fresh process (not fork)
     # This avoids inheriting broken httpx client state from parent process
-    ctx = multiprocessing.get_context('spawn')
+    ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
         future = executor.submit(_generate_embeddings_worker, signatures)
         return future.result()
@@ -1023,28 +1023,52 @@ def build_edges_for_file(
     selector_map: Optional[Dict[str, int]] = None,
 ) -> List[Tuple[int, Optional[int], str, str, Optional[int]]]:
     edges: List[Tuple[int, Optional[int], str, str, Optional[int]]] = []
-    
+
     # Use selector_map for CALLS edges if available, fallback to name_map
     _selector_map = selector_map or {}
 
     for symbol in symbols:
-        source_key = SymbolKey(symbol.file_path, symbol.symbol_name, symbol.start_byte, symbol.end_byte)
+        source_key = SymbolKey(
+            symbol.file_path, symbol.symbol_name, symbol.start_byte, symbol.end_byte
+        )
         source_id = id_map.get(source_key)
         if not source_id:
             continue
 
         for base in symbol.inherits:
             target_ids = name_map.get(base, [])
-            edges.append((source_id, target_ids[0] if target_ids else None, base, "INHERITS", symbol.line_number))
+            edges.append(
+                (
+                    source_id,
+                    target_ids[0] if target_ids else None,
+                    base,
+                    "INHERITS",
+                    symbol.line_number,
+                )
+            )
 
         for proto in symbol.conforms:
             target_ids = name_map.get(proto, [])
-            edges.append((source_id, target_ids[0] if target_ids else None, proto, "CONFORMS", symbol.line_number))
+            edges.append(
+                (
+                    source_id,
+                    target_ids[0] if target_ids else None,
+                    proto,
+                    "CONFORMS",
+                    symbol.line_number,
+                )
+            )
 
         if symbol.extends:
             target_ids = name_map.get(symbol.extends, [])
             edges.append(
-                (source_id, target_ids[0] if target_ids else None, symbol.extends, "EXTENDS", symbol.line_number)
+                (
+                    source_id,
+                    target_ids[0] if target_ids else None,
+                    symbol.extends,
+                    "EXTENDS",
+                    symbol.line_number,
+                )
             )
 
         for callee in symbol.calls:
@@ -1094,7 +1118,9 @@ def upsert_edges(
             )
 
 
-def rebuild_extension_map(conn: sqlite3.Connection, use_savepoints: bool, savepoint_name: str) -> None:
+def rebuild_extension_map(
+    conn: sqlite3.Connection, use_savepoints: bool, savepoint_name: str
+) -> None:
     with transaction_scope(conn, use_savepoints, savepoint_name):
         conn.execute("DELETE FROM extension_map")
         symbols = conn.execute(
@@ -1128,7 +1154,9 @@ def rebuild_extension_map(conn: sqlite3.Connection, use_savepoints: bool, savepo
             )
 
 
-def rebuild_bridging_edges(conn: sqlite3.Connection, use_savepoints: bool, savepoint_name: str) -> None:
+def rebuild_bridging_edges(
+    conn: sqlite3.Connection, use_savepoints: bool, savepoint_name: str
+) -> None:
     with transaction_scope(conn, use_savepoints, savepoint_name):
         conn.execute("DELETE FROM edges WHERE edge_type = 'BRIDGING'")
         swift_classes = conn.execute(
@@ -1189,9 +1217,7 @@ def update_unresolved_edges(
     sequence of UPDATEs themselves stable as well.
     """
     rows = conn.execute(
-        "SELECT id, target_symbol FROM edges "
-        "WHERE target_node_id IS NULL "
-        "ORDER BY id"
+        "SELECT id, target_symbol FROM edges WHERE target_node_id IS NULL ORDER BY id"
     ).fetchall()
     with transaction_scope(conn, use_savepoints, savepoint_name):
         for edge_id, target_symbol in rows:
@@ -1214,7 +1240,9 @@ def store_embeddings(
     embeddings = embed_signatures(signatures)
     with transaction_scope(conn, use_savepoints, savepoint_name):
         for symbol, embedding in zip(symbols, embeddings):
-            node_id = id_map.get(SymbolKey(symbol.file_path, symbol.symbol_name, symbol.start_byte, symbol.end_byte))
+            node_id = id_map.get(
+                SymbolKey(symbol.file_path, symbol.symbol_name, symbol.start_byte, symbol.end_byte)
+            )
             if node_id is None:
                 continue
             conn.execute(
@@ -1295,7 +1323,11 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
     stored_paths = set(stored_hashes.keys())
     orphan_paths = stored_paths - disk_paths
     new_paths = {path for path in disk_paths if path not in stored_paths}
-    changed_paths = {path for path in disk_paths if stored_hashes.get(path) and stored_hashes[path] != hash_results[path]}
+    changed_paths = {
+        path
+        for path in disk_paths
+        if stored_hashes.get(path) and stored_hashes[path] != hash_results[path]
+    }
 
     hash_to_new_paths: Dict[str, List[str]] = {}
     for path in new_paths:
@@ -1306,7 +1338,9 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         candidates = hash_to_new_paths.get(old_hash, [])
         if candidates:
             new_path = candidates.pop(0)
-            apply_rename(conn, old_path, new_path, old_hash, use_savepoints, next_savepoint("rename"))
+            apply_rename(
+                conn, old_path, new_path, old_hash, use_savepoints, next_savepoint("rename")
+            )
             new_paths.discard(new_path)
             orphan_paths.discard(old_path)
 
@@ -1335,8 +1369,9 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
 
     # DEBUG: Trace edge building
     total_symbols_with_inheritance = sum(
-        1 for symbols in file_to_symbols.values() 
-        for s in symbols 
+        1
+        for symbols in file_to_symbols.values()
+        for s in symbols
         if s.inherits or s.conforms or s.extends
     )
     log.debug(
@@ -1401,9 +1436,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
                     selector_map,
                 )
                 total_edges += len(edges)
-                upsert_edges(
-                    conn, file_path, edges, use_savepoints, next_savepoint("edges")
-                )
+                upsert_edges(conn, file_path, edges, use_savepoints, next_savepoint("edges"))
             except Exception as exc:
                 log.error(
                     "Failed to build/upsert edges for %s: %s: %s",
@@ -1433,7 +1466,9 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
             if fp not in failed_paths
             for symbol in symbols
         ]
-        store_embeddings(conn, all_symbols_to_embed, id_map, use_savepoints, next_savepoint("embeddings"))
+        store_embeddings(
+            conn, all_symbols_to_embed, id_map, use_savepoints, next_savepoint("embeddings")
+        )
         log.debug("PHASE_END embed")
 
     if full_reindex:
@@ -1443,6 +1478,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
     # as a warning by the helper itself and never aborts the indexing run.
     try:
         from . import _integrity  # local import to avoid widening import-time cost
+
         _integrity.log_integrity_check(conn)
     except Exception as exc:  # noqa: BLE001
         log.warning("integrity check wrapper failed: %s: %s", type(exc).__name__, exc)
@@ -1489,6 +1525,7 @@ def main() -> None:
     # tunes verbosity (default INFO; DEBUG enables PHASE_* benchmark
     # markers). GRAPHRAG_LOG_DIR overrides the path (used by tests).
     from ._logging import setup_logging
+
     setup_logging("indexer")
 
     # TLS configuration must come AFTER logging is wired so the WARNING emitted
@@ -1502,5 +1539,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

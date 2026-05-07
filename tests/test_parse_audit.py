@@ -15,8 +15,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 # Make the in-repo `tools/` package importable so we can call run_audit()
 # directly. Adding to sys.path is fine here — this is test-only and matches
 # how benchmarks/run.py would be tested if it were tested in-process.
@@ -71,9 +69,7 @@ def test_audit_smoke_against_calculator_app(tmp_path: Path) -> None:
     summary = payload["summary"]
     # The fixture has 8 source files (7 .swift sources + Package.swift).
     # Locking the count guards against accidental fixture changes.
-    assert summary["total_files"] == 8, (
-        f"fixture file count drifted: got {summary['total_files']}"
-    )
+    assert summary["total_files"] == 8, f"fixture file count drifted: got {summary['total_files']}"
     assert summary["files_with_has_error"] == 0
     assert summary["files_with_any_error_node"] == 0
     assert summary["files_with_any_error_node_percent"] == 0.0

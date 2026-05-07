@@ -1,5 +1,7 @@
 # iOS-GraphRAG
 
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml) <!-- TODO: replace OWNER/REPO with the actual GitHub path -->
+
 A semantic code intelligence engine for iOS/macOS codebases, built on the **"Map vs. Territory"** architecture. This MCP (Model Context Protocol) server provides AI-powered tools for navigating, searching, and understanding large Swift/Objective-C repositories (1M+ lines).
 
 ## Architecture Philosophy: Map vs. Territory
@@ -231,6 +233,16 @@ Optimized for **Apple Silicon (M-series)**:
 - **Embeddings:** `nomic-embed-text-v1.5` on MPS (Metal Performance Shaders)
 - **Graph Traversal:** NetworkX in-memory for O(1) lookups
 - **Storage:** SQLite with targeted indexes
+
+---
+
+## CI
+
+On every PR, CI runs ruff lint + format check, pytest on macOS Python 3.11/3.12, and `ios-graphrag-preflight --smoke` (offline checks only — the full preflight pulls a ~500MB embedding model and is meant for a fresh local machine, not CI).
+
+A nightly workflow runs the benchmark harness against the bundled `test_fixtures/CalculatorApp` fixture and uploads the JSON as a build artifact (90-day retention).
+
+See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and [`.github/workflows/nightly-benchmark.yml`](.github/workflows/nightly-benchmark.yml) for the full workflow definitions.
 
 ---
 

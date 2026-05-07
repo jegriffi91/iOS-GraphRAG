@@ -32,4 +32,47 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "ruff>=0.13,<0.16",
 ]
+
+# Permissive baseline so CI doesn't block on cosmetic issues that the
+# existing codebase emits today. The intent is to catch real bugs
+# (unused imports, undefined names, simple style) without burning a
+# whole phase on cleanup. Future phases can add F8 / B (bugbear) /
+# UP (pyupgrade) as the codebase tightens.
+#
+# - line-length 100 matches what most lines aim for; long-line policing
+#   is delegated to the formatter via E501 ignore (see [tool.ruff.lint]).
+# - target-version py311 matches `requires-python = ">=3.11"` above.
+# - extend-exclude trims directories we don't want to lint:
+#     .venv             — third-party code.
+#     test_fixtures     — Swift sources, not Python.
+#     engine/           — pre-Phase-0 legacy paths still on disk.
+#     benchmarks/results — generated JSON; nothing to lint.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "test_fixtures",
+    "engine",
+    "benchmarks/results",
+]
+
+[tool.ruff.lint]
+# Smallest reasonable rule set so the codebase passes today.
+# E (pycodestyle errors), F (pyflakes), I (isort).
+select = [
+    "E",
+    "F",
+    "I",
+]
+# E501 is enforced by `ruff format`, not the linter — they disagree on
+# how to break long strings, and we prefer the formatter's verdict.
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests sometimes import after fixture setup (env vars, sys.path tweaks).
+"tests/**" = ["E402"]

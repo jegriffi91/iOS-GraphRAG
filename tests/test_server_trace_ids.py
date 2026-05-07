@@ -12,6 +12,7 @@ indexed fixture DB. ``caplog`` captures records on the root logger; the
 decorator passes ``trace_id`` and friends via ``extra=`` so they live on
 the LogRecord and are accessible in the captured records.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,9 +24,7 @@ from unittest.mock import patch
 import pytest
 
 
-def test_handler_logs_trace_id_on_entry_and_exit(
-    indexed_db_path: Path, caplog
-):
+def test_handler_logs_trace_id_on_entry_and_exit(indexed_db_path: Path, caplog):
     """A normal tool call logs begin + end records sharing one trace_id."""
     from ios_graphrag import server
 
@@ -38,9 +37,7 @@ def test_handler_logs_trace_id_on_entry_and_exit(
         # handler returns a non-error result.
         conn = sqlite3.connect(str(indexed_db_path))
         try:
-            row = conn.execute(
-                "SELECT file_path FROM nodes LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT file_path FROM nodes LIMIT 1").fetchone()
         finally:
             conn.close()
         assert row is not None
@@ -72,9 +69,7 @@ def test_handler_logs_trace_id_on_entry_and_exit(
     assert matching_begin is not None, (
         f"no 'tool call begin' record carries trace_id={payload_trace!r}"
     )
-    assert matching_end is not None, (
-        f"no 'tool call end' record carries trace_id={payload_trace!r}"
-    )
+    assert matching_end is not None, f"no 'tool call end' record carries trace_id={payload_trace!r}"
     assert matching_begin.tool == "swift_dependency_tracer"
     assert matching_end.tool == "swift_dependency_tracer"
     # duration_ms is attached to the end record only.

@@ -20,6 +20,7 @@ long lines) won't actually exercise the try/except wrap — they just
 parse to empty symbols. That's still a useful regression: if any of
 these cases starts crashing in the future, this test will catch it.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -28,13 +29,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-
 _PROJECT_ROOT = Path(__file__).parent.parent
 _VALID_SWIFT_SOURCE = (
-    _PROJECT_ROOT / "test_fixtures" / "CalculatorApp" / "Sources"
-    / "CalculatorApp" / "Calculator.swift"
+    _PROJECT_ROOT
+    / "test_fixtures"
+    / "CalculatorApp"
+    / "Sources"
+    / "CalculatorApp"
+    / "Calculator.swift"
 )
 
 
@@ -89,6 +91,7 @@ def _indexer_env(tmp_path: Path) -> dict:
     logs into the user's ``~/Library/Logs/ios-graphrag/`` directory.
     """
     import os as _os
+
     env = _os.environ.copy()
     env["GRAPHRAG_LOG_DIR"] = str(tmp_path / "graphrag-logs")
     return env
@@ -107,9 +110,12 @@ def test_crash_isolation_against_malformed_files(tmp_path: Path):
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "ios_graphrag.indexer",
-            "--repo", str(repo_root),
-            "--db", str(db_path),
+            "-m",
+            "ios_graphrag.indexer",
+            "--repo",
+            str(repo_root),
+            "--db",
+            str(db_path),
             "--full",
         ],
         cwd=str(_PROJECT_ROOT),
@@ -174,9 +180,12 @@ def test_crash_isolation_run_summary(tmp_path: Path):
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "ios_graphrag.indexer",
-            "--repo", str(repo_root),
-            "--db", str(db_path),
+            "-m",
+            "ios_graphrag.indexer",
+            "--repo",
+            str(repo_root),
+            "--db",
+            str(db_path),
             "--full",
         ],
         cwd=str(_PROJECT_ROOT),

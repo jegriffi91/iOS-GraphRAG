@@ -26,6 +26,7 @@ Design notes:
   "duplicate column" and treats the migration as already applied -- this
   recovers gracefully from a previously-partial migration.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,9 +44,7 @@ class SchemaMismatchError(RuntimeError):
 
 # Repo layout: <repo>/src/ios_graphrag/_migrations.py and
 # <repo>/engine/database/migrations/. parents[2] of this file is the repo root.
-MIGRATIONS_DIR = (
-    Path(__file__).resolve().parents[2] / "engine" / "database" / "migrations"
-)
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "engine" / "database" / "migrations"
 MIGRATION_FILENAME_RE = re.compile(r"^(\d{3})_[\w_]+\.sql$")
 
 
@@ -110,9 +109,7 @@ def _split_sql_statements(sql: str) -> List[str]:
     We cannot use ``executescript`` because it issues an implicit
     COMMIT, which would break the atomic version-stamp guarantee.
     """
-    sql_only = "\n".join(
-        line for line in sql.splitlines() if not line.strip().startswith("--")
-    )
+    sql_only = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
     statements: List[str] = []
     for raw in sql_only.split(";"):
         body = raw.strip()

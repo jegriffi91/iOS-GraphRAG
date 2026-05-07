@@ -9,6 +9,7 @@ entry-point reference (renamed module, removed main, import-time
 error in the target, or a missing line in [project.scripts]) fails
 loudly instead of slipping through.
 """
+
 import os
 import subprocess
 

@@ -94,7 +94,10 @@ def _git_sha(repo: Path) -> str:
     try:
         out = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, check=True, timeout=10,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
         )
         return out.stdout.strip()
     except Exception:
@@ -124,19 +127,41 @@ def _count_loc(repo: Path) -> Optional[int]:
     try:
         # find ... | xargs wc -l. Pipe through awk to print only the total.
         find = subprocess.run(
-            ["find", str(repo),
-             "-type", "f",
-             "(", "-name", "*.swift", "-o", "-name", "*.h", "-o", "-name", "*.m", ")",
-             "-not", "-path", "*/.build/*",
-             "-not", "-path", "*/Pods/*",
-             "-print0"],
-            capture_output=True, check=True, timeout=60,
+            [
+                "find",
+                str(repo),
+                "-type",
+                "f",
+                "(",
+                "-name",
+                "*.swift",
+                "-o",
+                "-name",
+                "*.h",
+                "-o",
+                "-name",
+                "*.m",
+                ")",
+                "-not",
+                "-path",
+                "*/.build/*",
+                "-not",
+                "-path",
+                "*/Pods/*",
+                "-print0",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
         )
         if not find.stdout:
             return 0
         wc = subprocess.run(
             ["xargs", "-0", "wc", "-l"],
-            input=find.stdout, capture_output=True, check=True, timeout=120,
+            input=find.stdout,
+            capture_output=True,
+            check=True,
+            timeout=120,
         )
         # The last line is "<total> total" for multi-file output, or
         # "<lines> <single_file>" for a single file.
@@ -155,6 +180,7 @@ def _torch_version() -> str:
     """Return torch.__version__ if importable, else "unavailable"."""
     try:
         import torch  # noqa: F401  (just to read __version__)
+
         return torch.__version__
     except Exception:
         return "unavailable"
@@ -169,6 +195,7 @@ def _parse_phase_markers(stderr_text: str) -> Dict[str, float]:
     a no-op incremental) are simply absent from the output.
     """
     import re
+
     # Match: "2026-05-06 12:34:56,789 [DEBUG] ... PHASE_START hash"
     pattern = re.compile(
         r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}).*?PHASE_(?P<edge>START|END) (?P<name>\w+)",
@@ -187,9 +214,7 @@ def _parse_phase_markers(stderr_text: str) -> Dict[str, float]:
     return durations
 
 
-def _run_indexer(
-    repo: Path, db_path: Path, full: bool
-) -> Tuple[float, int, str]:
+def _run_indexer(repo: Path, db_path: Path, full: bool) -> Tuple[float, int, str]:
     """Run the indexer subprocess. Returns (wall_seconds, peak_rss_bytes, stderr).
 
     Subprocess is the right boundary because the indexer spawns its own
@@ -200,15 +225,22 @@ def _run_indexer(
     env = os.environ.copy()
     env["GRAPHRAG_LOG_LEVEL"] = "DEBUG"
     cmd = [
-        sys.executable, "-m", "ios_graphrag.indexer",
-        "--repo", str(repo),
-        "--db", str(db_path),
+        sys.executable,
+        "-m",
+        "ios_graphrag.indexer",
+        "--repo",
+        str(repo),
+        "--db",
+        str(db_path),
     ]
     if full:
         cmd.append("--full")
     t0 = time.monotonic()
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, env=env,
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
         cwd=str(PROJECT_ROOT),
         timeout=3600,
     )
@@ -223,14 +255,13 @@ def _run_indexer(
     # ``getrusage(RUSAGE_CHILDREN)`` aggregates across all reaped children.
     # That's good enough for our purpose — the indexer is the only thing
     # we've forked at this point.
-    peak_rss = _platform_rss_to_bytes(
-        resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-    )
+    peak_rss = _platform_rss_to_bytes(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
     return elapsed, peak_rss, proc.stderr
 
 
 def _query_db(db_path: Path, query: str) -> List:
     import sqlite3
+
     conn = sqlite3.connect(str(db_path))
     try:
         return conn.execute(query).fetchall()
@@ -238,9 +269,7 @@ def _query_db(db_path: Path, query: str) -> List:
         conn.close()
 
 
-def _measure_full_index(
-    repo: Path, db_path: Path
-) -> Dict:
+def _measure_full_index(repo: Path, db_path: Path) -> Dict:
     """Section 1: full index pass. Always runs; section is mandatory.
 
     On an empty/no-Swift repo, the indexer still completes cleanly (zero
@@ -269,11 +298,16 @@ def _measure_full_index(
     }
 
 
-def _git(repo: Path, *args: str, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
+def _git(
+    repo: Path, *args: str, check: bool = True, capture: bool = True
+) -> subprocess.CompletedProcess:
     """``git -C <repo> ...`` helper. Never cd's; uses -C exclusively."""
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=capture, text=True, check=check, timeout=60,
+        capture_output=capture,
+        text=True,
+        check=check,
+        timeout=60,
     )
 
 
@@ -291,8 +325,7 @@ def _sample_changed_files(repo: Path, n: int) -> Optional[List[str]]:
             try:
                 out = _git(repo, "diff", "--name-only", f"HEAD~{k}..HEAD", check=True)
                 files = [
-                    line for line in out.stdout.splitlines()
-                    if line and (repo / line).is_file()
+                    line for line in out.stdout.splitlines() if line and (repo / line).is_file()
                 ]
                 if len(files) >= n:
                     random.shuffle(files)
@@ -307,9 +340,7 @@ def _sample_changed_files(repo: Path, n: int) -> Optional[List[str]]:
         return None
 
 
-def _measure_incremental(
-    repo: Path, db_path: Path
-) -> Dict:
+def _measure_incremental(repo: Path, db_path: Path) -> Dict:
     """Section 2: incremental at deltas of 10/100/1000 files.
 
     Strategy:
@@ -395,9 +426,7 @@ def _measure_incremental(
     return out
 
 
-def _measure_server_cold_start(
-    db_path: Path
-) -> Dict:
+def _measure_server_cold_start(db_path: Path) -> Dict:
     """Section 3: spawn the server and wait for the READY token on stderr.
 
     We use a token-based approach (not a JSON-RPC handshake) because the
@@ -424,7 +453,8 @@ def _measure_server_cold_start(
     cmd = [sys.executable, "-m", "ios_graphrag.server"]
     t0 = time.monotonic()
     proc = subprocess.Popen(
-        cmd, env=env,
+        cmd,
+        env=env,
         cwd=str(PROJECT_ROOT),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -495,9 +525,17 @@ def _percentiles(values: List[float]) -> Dict[str, float]:
     np.percentile and matches what most reviewers will expect.
     """
     import numpy as np
+
     if not values:
-        return {"p50": float("nan"), "p95": float("nan"), "p99": float("nan"),
-                "min": float("nan"), "max": float("nan"), "mean": float("nan"), "n": 0}
+        return {
+            "p50": float("nan"),
+            "p95": float("nan"),
+            "p99": float("nan"),
+            "min": float("nan"),
+            "max": float("nan"),
+            "mean": float("nan"),
+            "n": 0,
+        }
     arr = np.array(values, dtype=np.float64)
     return {
         "p50": float(np.percentile(arr, 50)),
@@ -510,9 +548,7 @@ def _percentiles(values: List[float]) -> Dict[str, float]:
     }
 
 
-def _measure_search_latency(
-    db_path: Path, n_queries: int = 1000
-) -> Dict:
+def _measure_search_latency(db_path: Path, n_queries: int = 1000) -> Dict:
     """Section 4 + 5: in-process latency distributions for the two hot tools.
 
     We import ``ios_graphrag.server`` and call its handlers directly (same
@@ -555,8 +591,14 @@ def _measure_search_latency(
     try:
         from ios_graphrag import server
     except Exception as exc:
-        out["semantic_search_latency_ms"] = {"skipped": True, "reason": f"server import failed: {exc}"}
-        out["trace_dependencies_latency_ms"] = {"skipped": True, "reason": f"server import failed: {exc}"}
+        out["semantic_search_latency_ms"] = {
+            "skipped": True,
+            "reason": f"server import failed: {exc}",
+        }
+        out["trace_dependencies_latency_ms"] = {
+            "skipped": True,
+            "reason": f"server import failed: {exc}",
+        }
         return out
 
     server.GRAPH.clear()
@@ -565,7 +607,10 @@ def _measure_search_latency(
         server.load_graph(str(db_path))
     except Exception as exc:
         out["semantic_search_latency_ms"] = {"skipped": True, "reason": f"load_graph failed: {exc}"}
-        out["trace_dependencies_latency_ms"] = {"skipped": True, "reason": f"load_graph failed: {exc}"}
+        out["trace_dependencies_latency_ms"] = {
+            "skipped": True,
+            "reason": f"load_graph failed: {exc}",
+        }
         return out
 
     # ---- semantic_search ----
@@ -591,7 +636,10 @@ def _measure_search_latency(
             sem_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
         out["semantic_search_latency_ms"] = _percentiles(sem_latencies_ms)
     except Exception as exc:
-        out["semantic_search_latency_ms"] = {"skipped": True, "reason": f"latency loop crashed: {exc}"}
+        out["semantic_search_latency_ms"] = {
+            "skipped": True,
+            "reason": f"latency loop crashed: {exc}",
+        }
 
     # ---- trace_dependencies ----
     trace_latencies_ms: List[float] = []
@@ -605,7 +653,10 @@ def _measure_search_latency(
             trace_latencies_ms.append((time.perf_counter() - t0) * 1000.0)
         out["trace_dependencies_latency_ms"] = _percentiles(trace_latencies_ms)
     except Exception as exc:
-        out["trace_dependencies_latency_ms"] = {"skipped": True, "reason": f"latency loop crashed: {exc}"}
+        out["trace_dependencies_latency_ms"] = {
+            "skipped": True,
+            "reason": f"latency loop crashed: {exc}",
+        }
 
     return out
 
@@ -672,7 +723,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--repo", required=True, help="Path to the repository to benchmark.")
     parser.add_argument(
-        "--db", default=None,
+        "--db",
+        default=None,
         help=(
             "Path for the benchmark SQLite DB. Defaults to a temp file. "
             "If you pass this and the file exists, it will be overwritten by "
@@ -680,15 +732,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
-        "--output", default=str(PROJECT_ROOT / "benchmarks" / "results"),
+        "--output",
+        default=str(PROJECT_ROOT / "benchmarks" / "results"),
         help="Directory for the result JSON. Created if missing.",
     )
     parser.add_argument(
-        "--n-queries", type=int, default=1000,
+        "--n-queries",
+        type=int,
+        default=1000,
         help="Number of queries for the latency distributions (default: 1000).",
     )
     parser.add_argument(
-        "--seed", type=int, default=20260506,
+        "--seed",
+        type=int,
+        default=20260506,
         help="RNG seed for query/file sampling (default: deterministic).",
     )
     args = parser.parse_args(argv)
@@ -709,6 +766,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         cleanup_db = False
     else:
         import tempfile
+
         tmpdir = Path(tempfile.mkdtemp(prefix="ios-graphrag-bench-"))
         db_path = tmpdir / "bench.sqlite"
         cleanup_db = True
@@ -748,8 +806,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         latencies = _measure_search_latency(db_path, n_queries=args.n_queries)
         result.update(latencies)
     except Exception as exc:
-        result["semantic_search_latency_ms"] = {"skipped": True, "reason": f"{type(exc).__name__}: {exc}"}
-        result["trace_dependencies_latency_ms"] = {"skipped": True, "reason": f"{type(exc).__name__}: {exc}"}
+        result["semantic_search_latency_ms"] = {
+            "skipped": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+        result["trace_dependencies_latency_ms"] = {
+            "skipped": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
 
     # 6. Memory snapshots.
     print("[benchmark] section 6: memory snapshots...", file=sys.stderr)

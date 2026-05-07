@@ -13,6 +13,7 @@ Default posture: TLS verification is ON. Two opt-in escape hatches:
   ``SSL_CERT_FILE`` at a corporate CA bundle. Verification stays ON. This is
   the recommended path; see ``engine/CONNECTION_GUIDE.md``.
 """
+
 from __future__ import annotations
 
 import logging

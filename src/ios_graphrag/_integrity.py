@@ -8,6 +8,7 @@ at the end of every indexing run for visibility; ``ios-graphrag-doctor
 Returns a structured dict so the doctor CLI can render its own report
 format without reparsing log strings.
 """
+
 from __future__ import annotations
 
 import logging
@@ -78,9 +79,7 @@ def _missing_file_paths(conn: sqlite3.Connection) -> List[str]:
     Sorted for determinism so the same DB always reports paths in the
     same order, which keeps the doctor's report stable across runs.
     """
-    rows = conn.execute(
-        "SELECT DISTINCT file_path FROM nodes ORDER BY file_path"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT file_path FROM nodes ORDER BY file_path").fetchall()
     missing: List[str] = []
     for (path,) in rows:
         if path and not os.path.exists(path):

@@ -27,7 +27,6 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-
 DEFAULT_LOG_DIR = Path.home() / "Library" / "Logs" / "ios-graphrag"
 ROTATION_BYTES = 50 * 1024 * 1024
 ROTATION_BACKUPS = 5
@@ -142,9 +141,7 @@ def setup_logging(component: str, *, level: Optional[str] = None) -> Path:
 
     log_file = log_dir / f"{component}.log"
 
-    text_fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
+    text_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     json_fmt = JsonLineFormatter()
 
     stderr_handler = logging.StreamHandler(sys.stderr)

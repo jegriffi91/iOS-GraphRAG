@@ -15,11 +15,11 @@ of those config files has shifted across Copilot releases, so the
 output includes a "verify against your current Copilot CLI version"
 note (see roadmap P3.2).
 """
+
 from __future__ import annotations
 
 import argparse
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -28,7 +28,6 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
-
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -76,8 +75,7 @@ def check_python_version() -> CheckResult:
             status="fail",
             detail=f"found Python {cur_str}; need >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}",
             remediation=(
-                "Install Python 3.11+ from python.org or via homebrew "
-                "(brew install python@3.12)."
+                "Install Python 3.11+ from python.org or via homebrew (brew install python@3.12)."
             ),
         )
     return CheckResult(
@@ -134,9 +132,7 @@ def check_free_disk_space() -> CheckResult:
             name="Free disk space",
             status="fail",
             detail=f"{free_gb:.1f} GB free in {home}; need >= {MIN_FREE_DISK_GB} GB",
-            remediation=(
-                "Free up space or set IOS_GRAPHRAG_DB_PATH to a different volume."
-            ),
+            remediation=("Free up space or set IOS_GRAPHRAG_DB_PATH to a different volume."),
         )
     return CheckResult(
         name="Free disk space",
@@ -179,9 +175,7 @@ def check_embedding_model() -> CheckResult:
 
 
 _SWIFT_SMOKE = (
-    "import Foundation\n"
-    "func add(_ a: Int, _ b: Int) -> Int { return a + b }\n"
-    "class Foo {}\n"
+    "import Foundation\nfunc add(_ a: Int, _ b: Int) -> Int { return a + b }\nclass Foo {}\n"
 )
 
 
@@ -355,11 +349,11 @@ def check_round_trip_search(db_path: Path) -> CheckResult:
     try:
         # Import lazily so the first preflight steps don't transitively pull
         # in heavy server-side dependencies before they're known to work.
-        from ios_graphrag import server  # noqa: PLC0415
-
         # Reset server globals so a previous test/preflight invocation in the
         # same interpreter doesn't pollute the matrix.
         import networkx as nx  # noqa: PLC0415
+
+        from ios_graphrag import server  # noqa: PLC0415
 
         server.GRAPH = nx.DiGraph()
         server.NODE_META = {}
@@ -483,20 +477,40 @@ def render_config_footer(home: Optional[Path] = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def run_all_checks() -> Tuple[List[CheckResult], int]:
-    """Run every check sequentially. Returns (results, exit_code)."""
+def run_all_checks(smoke: bool = False) -> Tuple[List[CheckResult], int]:
+    """Run every check sequentially. Returns (results, exit_code).
+
+    When ``smoke=True``, skip the network-dependent checks (embedding
+    model load, smoke index subprocess, round-trip semantic search) and
+    run only the offline checks: Python version, MPS, disk, tree-sitter
+    Swift parse. Designed for CI use where pulling 500 MB of model
+    weights every run is unacceptable; the full suite remains the
+    recommended local fresh-machine check.
+    """
     results: List[CheckResult] = []
 
     # Hard checks first; if Python is too old or model load fails, the
     # downstream checks (smoke index, semantic search) won't be useful
     # data — but they'll still run so users get a complete picture.
-    sequence: List[Callable[[], CheckResult]] = [
-        check_python_version,
-        check_mps_available,
-        check_free_disk_space,
-        check_embedding_model,
-        check_tree_sitter_swift,
-    ]
+    sequence: List[Callable[[], CheckResult]]
+    if smoke:
+        # Offline-only checks. Skip embedding model load (network +
+        # 500MB download) and tree-sitter is fine because the grammar
+        # ships as a Python wheel.
+        sequence = [
+            check_python_version,
+            check_mps_available,
+            check_free_disk_space,
+            check_tree_sitter_swift,
+        ]
+    else:
+        sequence = [
+            check_python_version,
+            check_mps_available,
+            check_free_disk_space,
+            check_embedding_model,
+            check_tree_sitter_swift,
+        ]
     for fn in sequence:
         try:
             results.append(fn())
@@ -509,6 +523,12 @@ def run_all_checks() -> Tuple[List[CheckResult], int]:
                     remediation="File a bug report via `ios-graphrag-doctor --bug-report`.",
                 )
             )
+
+    # In smoke mode the offline checks are all we run — return early
+    # before triggering the indexer subprocess + model load.
+    if smoke:
+        failed = [r for r in results if r.status == "fail"]
+        return results, (1 if failed else 0)
 
     # Smoke index + round-trip share a tmpdir so the round-trip can read
     # the DB the smoke index just wrote.
@@ -575,16 +595,27 @@ def main() -> int:
             "tree-sitter grammar, and a tiny smoke-index round trip."
         ),
     )
-    # Reserve --help only; no other flags today. The roadmap may add a
-    # --smoke-only mode later (see Phase 6e CI gating in PRODUCTION_ROADMAP.md).
-    parser.parse_args()
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help=(
+            "Run only the offline checks (Python, MPS, disk, tree-sitter "
+            "Swift parse). Skip the embedding model load, smoke index "
+            "subprocess, and round-trip semantic search — those require "
+            "network and a ~500MB model download and are not viable in CI."
+        ),
+    )
+    args = parser.parse_args()
 
-    results, rc = run_all_checks()
+    results, rc = run_all_checks(smoke=args.smoke)
     print(render_results(results))
-    if rc == 0:
+    # Don't print the Copilot/VS Code config footer in smoke mode — it's
+    # noise for CI, and we haven't actually verified the model+smoke index
+    # path that the footer alludes to.
+    if rc == 0 and not args.smoke:
         print()
         print(render_config_footer())
-    else:
+    elif rc != 0:
         print()
         print(
             "Preflight detected hard failures. Re-run after applying the "

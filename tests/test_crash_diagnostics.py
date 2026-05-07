@@ -18,17 +18,15 @@ Tests are designed to be hermetic: each one points
 ``GRAPHRAG_LOG_DIR`` at a tmpdir to keep the user's
 ``~/Library/Logs/ios-graphrag/`` directory clean.
 """
+
 from __future__ import annotations
 
 import os
-import sqlite3
 import threading
-import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Ring buffer behaviour
@@ -56,9 +54,7 @@ def test_recent_calls_ring_buffer_caps_at_limit(monkeypatch):
         )
 
     snapshot = _diagnostics._snapshot_recent_calls()
-    assert len(snapshot) == 3, (
-        f"buffer cap=3 should keep 3 entries, got {len(snapshot)}"
-    )
+    assert len(snapshot) == 3, f"buffer cap=3 should keep 3 entries, got {len(snapshot)}"
     # deque.maxlen evicts oldest first, so we keep entries 2,3,4.
     trace_ids = [e["trace_id"] for e in snapshot]
     assert trace_ids == ["trace002", "trace003", "trace004"]
@@ -237,9 +233,7 @@ def test_crashdump_swallows_write_errors(tmp_path, monkeypatch):
         ro_dir.chmod(0o700)
 
 
-def test_handler_error_does_not_write_crashdump(
-    tmp_path, monkeypatch, indexed_db_path: Path
-):
+def test_handler_error_does_not_write_crashdump(tmp_path, monkeypatch, indexed_db_path: Path):
     """A handled exception inside a tool handler must NOT write a dump.
 
     Crashdumps are reserved for excepthook-level (uncaught) failures;
@@ -274,9 +268,7 @@ def test_handler_error_does_not_write_crashdump(
 
     # The error must NOT have produced a crashdump file.
     dumps = list(tmp_path.glob("crashdump-*.txt"))
-    assert dumps == [], (
-        f"handled tool error should not write a crashdump; found {dumps}"
-    )
+    assert dumps == [], f"handled tool error should not write a crashdump; found {dumps}"
 
     # But the failed call SHOULD have been recorded in the ring buffer
     # (so a follow-on excepthook-level crash could still see the lead-up).

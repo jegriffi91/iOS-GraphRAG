@@ -14,18 +14,17 @@ Coverage:
 6. ``ios-graphrag-doctor --verify`` exits 1 with "orphan" in its output
    when the DB has orphan edges.
 """
+
 from __future__ import annotations
 
 import os
 import sqlite3
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from ios_graphrag import _integrity, _migrations, indexer
-
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 _TEST_FIXTURES = _PROJECT_ROOT / "test_fixtures" / "CalculatorApp"
@@ -89,6 +88,7 @@ def fresh_indexed_db(tmp_path: Path) -> Path:
     # Copy the fixture into tmp_path so deletion tests don't touch the
     # repo's checked-in fixture files.
     import shutil
+
     fixture_copy = tmp_path / "CalculatorApp"
     shutil.copytree(_TEST_FIXTURES, fixture_copy, symlinks=False)
 
@@ -113,9 +113,7 @@ def test_run_integrity_on_clean_db(fresh_indexed_db: Path) -> None:
     assert counts["edges"] > 0, "indexer should produce some edges"
     assert counts["file_hashes"] > 0, "file_hashes should be populated"
 
-    assert result["orphan_edges"] == 0, (
-        f"clean DB has unexpected orphans: {result}"
-    )
+    assert result["orphan_edges"] == 0, f"clean DB has unexpected orphans: {result}"
     assert result["missing_files"] == [], (
         f"clean DB reports missing files: {result['missing_files']}"
     )
@@ -145,9 +143,7 @@ def test_orphan_edges_detected(fresh_indexed_db: Path) -> None:
     finally:
         conn.close()
 
-    assert result["orphan_edges"] >= 1, (
-        f"expected orphan_edges>=1, got {result}"
-    )
+    assert result["orphan_edges"] >= 1, f"expected orphan_edges>=1, got {result}"
 
 
 def test_missing_file_paths_detected(fresh_indexed_db: Path, tmp_path: Path) -> None:
@@ -163,9 +159,7 @@ def test_missing_file_paths_detected(fresh_indexed_db: Path, tmp_path: Path) -> 
     target_path = rows[0][0]
 
     # Sanity: the file should exist before we delete it.
-    assert os.path.exists(target_path), (
-        f"file_path in DB not on disk yet: {target_path}"
-    )
+    assert os.path.exists(target_path), f"file_path in DB not on disk yet: {target_path}"
 
     os.unlink(target_path)
 
@@ -223,9 +217,7 @@ def test_unique_edges_migration_dedupes_existing(tmp_path: Path) -> None:
         assert new_version >= 3, "migration 003 should have applied"
 
         after = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
-        assert after == 1, (
-            f"expected dedup to leave 1 row, got {after}"
-        )
+        assert after == 1, f"expected dedup to leave 1 row, got {after}"
     finally:
         conn.close()
 
@@ -308,6 +300,5 @@ def test_doctor_verify_exits_1_on_orphan_edges(fresh_indexed_db: Path) -> None:
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "orphan" in combined.lower(), (
-        f"expected 'orphan' in output, got:\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"expected 'orphan' in output, got:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )

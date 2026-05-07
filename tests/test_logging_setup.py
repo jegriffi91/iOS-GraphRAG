@@ -11,9 +11,9 @@ Coverage:
 4. ``setup_logging`` is idempotent: calling it twice still leaves the
    root logger with exactly two handlers (stderr + rotating file).
 """
+
 from __future__ import annotations
 
-import io
 import json
 import logging
 from pathlib import Path
@@ -98,6 +98,7 @@ def test_json_formatter_roundtrip(tmp_path: Path, monkeypatch):
     # against a struct_time, so the formatter computes ms manually --
     # this assertion catches regressions to the literal "%f" form.
     import re as _re
+
     assert "ts" in last
     assert _re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}$", last["ts"]), (
         f"ts is not ISO-8601 with milliseconds: {last['ts']!r}"
@@ -130,9 +131,7 @@ def test_text_formatter_on_stderr(tmp_path: Path, monkeypatch, capfd):
             continue
         # Confirm the line is NOT a JSON object: text formatter prefix is
         # "<timestamp> [LEVEL] logger: message" — not a JSON {...}.
-        assert not line.lstrip().startswith("{"), (
-            f"stderr line should be text, not JSON: {line!r}"
-        )
+        assert not line.lstrip().startswith("{"), f"stderr line should be text, not JSON: {line!r}"
         # And confirm the human-readable shape is present.
         assert "[WARNING]" in line
         assert "ios_graphrag.test.text" in line

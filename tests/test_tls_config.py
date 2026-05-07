@@ -14,6 +14,7 @@ The contract under test:
 All tests use monkeypatch fixtures so env-var and ssl-state mutations don't
 leak between tests.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,6 @@ from pathlib import Path
 import pytest
 
 from ios_graphrag import _tls
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -72,7 +72,8 @@ def test_env_var_activates_bypass_and_logs_warning(monkeypatch, caplog):
     assert ssl._create_default_https_context is ssl._create_unverified_context
     # Find the warning record (formatting goes through %-args, so check the message text).
     warning_records = [
-        r for r in caplog.records
+        r
+        for r in caplog.records
         if r.levelno == logging.WARNING and "TLS verification disabled" in r.getMessage()
     ]
     assert warning_records, (
@@ -91,6 +92,7 @@ def test_cert_bundle_sets_env_vars(monkeypatch, tmp_path: Path):
     _tls.configure_cert_bundle(str(bundle))
 
     import os
+
     assert os.environ.get("REQUESTS_CA_BUNDLE") == str(bundle.resolve())
     assert os.environ.get("SSL_CERT_FILE") == str(bundle.resolve())
 
@@ -124,9 +126,7 @@ def test_grep_no_bypass_outside_tls_module():
     )
     # grep exits 1 when there are zero matches (which would also be fine —
     # _tls.py contains the string, so we expect rc=0). Treat rc>1 as error.
-    assert result.returncode in (0, 1), (
-        f"grep failed (rc={result.returncode}): {result.stderr}"
-    )
+    assert result.returncode in (0, 1), f"grep failed (rc={result.returncode}): {result.stderr}"
 
     files_with_hit = [line for line in result.stdout.splitlines() if line.strip()]
     # Normalize: every hit must be inside _tls.py.

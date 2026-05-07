@@ -10,17 +10,14 @@ Covers:
 * Each top-level diagnose function returns a Diagnosis with a known
   status.
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
-import pytest
-
 from ios_graphrag import doctor
-
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -50,8 +47,7 @@ def test_doctor_runs_on_healthy_system(indexed_db_path: Path):
     # Doctor exits 0 unless a hard ERROR diagnosis surfaces. On this machine
     # MPS may be unavailable (WARN) but that does not cause a non-zero exit.
     assert result.returncode == 0, (
-        f"doctor exited rc={result.returncode}\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"doctor exited rc={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
     # Header line and the expected diagnostic checks must appear.
     assert "ios-graphrag-doctor" in result.stdout

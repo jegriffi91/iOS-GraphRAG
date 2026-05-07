@@ -27,6 +27,7 @@ already observable via ``ios-graphrag-doctor --tail-errors``. The
 crashdump is reserved for excepthook-level failures (startup errors,
 thread-level crashes) that the decorator can't see.
 """
+
 from __future__ import annotations
 
 import collections
@@ -294,8 +295,7 @@ def _format_crashdump(
             duration = redacted.get("duration_ms", "?")
             trace_id = redacted.get("trace_id", "?")
             lines.append(
-                f"{ts}  tool={tool}  status={status}  "
-                f"duration_ms={duration}  trace_id={trace_id}"
+                f"{ts}  tool={tool}  status={status}  duration_ms={duration}  trace_id={trace_id}"
             )
             tool_args = redacted.get("tool_args", {})
             if tool_args:

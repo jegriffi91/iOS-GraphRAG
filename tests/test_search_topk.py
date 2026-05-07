@@ -12,6 +12,7 @@ These tests stub out ``EMBEDDING_MATRIX`` / ``EMBEDDING_IDS`` and the
 embedding model so they run without any indexed DB or sentence-transformers
 download. They exercise the math directly.
 """
+
 from __future__ import annotations
 
 from typing import List, Tuple
@@ -79,16 +80,12 @@ def test_argpartition_returns_top_k_in_descending_score_order() -> None:
     results = out["results"]
     assert len(results) == 5, f"expected 5 results, got {len(results)}"
     scores = [r["score"] for r in results]
-    assert scores == sorted(scores, reverse=True), (
-        f"scores not descending: {scores!r}"
-    )
+    assert scores == sorted(scores, reverse=True), f"scores not descending: {scores!r}"
     # The top-5 must be the rows we pinned (ordering across them
     # confirmed by the descending check above).
     expected_ids = {7, 19, 31, 42, 5}
     got_ids = {r["node_id"] for r in results}
-    assert got_ids == expected_ids, (
-        f"top-5 node_ids wrong; expected {expected_ids}, got {got_ids}"
-    )
+    assert got_ids == expected_ids, f"top-5 node_ids wrong; expected {expected_ids}, got {got_ids}"
 
 
 def test_argpartition_handles_top_k_exceeding_corpus_size() -> None:
@@ -113,8 +110,6 @@ def test_argpartition_handles_top_k_exceeding_corpus_size() -> None:
     results = out["results"]
     assert len(results) == 10, f"expected all 10 rows, got {len(results)}"
     scores = [r["score"] for r in results]
-    assert scores == sorted(scores, reverse=True), (
-        f"scores not descending under k>N: {scores!r}"
-    )
+    assert scores == sorted(scores, reverse=True), f"scores not descending under k>N: {scores!r}"
     # Sanity: every node_id appears exactly once.
     assert sorted(r["node_id"] for r in results) == list(range(10))

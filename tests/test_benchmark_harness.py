@@ -15,6 +15,7 @@ that also exercise full indexer + server lifecycles.
 Each test gets its own tmp_path output directory so concurrent runs and
 re-runs don't trip over each other's results.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 TEST_FIXTURES_DIR = PROJECT_ROOT / "test_fixtures" / "CalculatorApp"
@@ -40,10 +39,14 @@ def _run_harness(repo: Path, output_dir: Path, db_path: Path) -> Path:
         [
             sys.executable,
             str(HARNESS_PATH),
-            "--repo", str(repo),
-            "--db", str(db_path),
-            "--output", str(output_dir),
-            "--n-queries", "10",
+            "--repo",
+            str(repo),
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--n-queries",
+            "10",
         ],
         capture_output=True,
         text=True,
@@ -89,9 +92,7 @@ def test_harness_smoke_against_calculator_app(tmp_path):
     assert "full_index" in data
     fi = data["full_index"]
     # If full-index was skipped the harness records {"skipped": True, ...}.
-    assert "skipped" not in fi, (
-        f"full_index unexpectedly skipped: {fi.get('reason')}"
-    )
+    assert "skipped" not in fi, f"full_index unexpectedly skipped: {fi.get('reason')}"
     assert fi["symbol_count"] > 0, (
         f"expected symbols indexed in CalculatorApp, got {fi['symbol_count']}"
     )
@@ -129,9 +130,7 @@ def test_harness_handles_empty_repo(tmp_path):
     assert "full_index" in data
     fi = data["full_index"]
     assert "skipped" not in fi
-    assert fi["symbol_count"] == 0, (
-        f"expected 0 symbols for empty repo, got {fi['symbol_count']}"
-    )
+    assert fi["symbol_count"] == 0, f"expected 0 symbols for empty repo, got {fi['symbol_count']}"
     assert fi["edge_count"] == 0
 
 
@@ -161,7 +160,8 @@ def test_harness_skips_incremental_when_no_git_history(tmp_path):
     subprocess.run(["git", "-C", str(repo), "add", "Foo.swift"], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-q", "-m", "initial"],
-        check=True, env=env,
+        check=True,
+        env=env,
     )
 
     output_dir = tmp_path / "results"

@@ -10,10 +10,14 @@ Strategy:
   ``uv run ios-graphrag-preflight`` and asserts rc=0. We skip when the
   model isn't already present in the HF cache so a clean CI environment
   doesn't kick off a half-gig download silently.
+* ``test_preflight_smoke_skips_network_checks`` runs ``--smoke`` and
+  asserts the model-load + smoke-index + round-trip sections do NOT
+  appear in the output. This is the path CI uses (Phase 6e).
 * ``test_preflight_fails_loud_on_python_too_old`` is a unit test for
   the python-version check. monkeypatch swaps ``sys.version_info`` and
   asserts the returned ``CheckResult`` is a fail.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -22,7 +26,6 @@ from pathlib import Path
 import pytest
 
 from ios_graphrag import preflight
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,6 +88,63 @@ def test_preflight_passes_on_smoke_install():
     assert "Summary:" in result.stdout
     # Footer should appear on green runs.
     assert "Recommended DB path:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Smoke mode (offline-only checks, safe for CI)
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_smoke_skips_network_checks(tmp_path):
+    """``--smoke`` runs only offline checks; no model load / smoke index.
+
+    Pins HF cache to a tmpdir so even if the smoke path were to silently
+    invoke huggingface, we'd see a fresh, empty cache and the test would
+    fail loudly rather than hit the user's real cache.
+    """
+    env = dict(__import__("os").environ)
+    env["HF_HOME"] = str(tmp_path / "hf")
+    env["TRANSFORMERS_CACHE"] = str(tmp_path / "hf")
+    env["HUGGINGFACE_HUB_CACHE"] = str(tmp_path / "hf")
+    result = subprocess.run(
+        ["uv", "run", "ios-graphrag-preflight", "--smoke"],
+        cwd=str(_PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=2 * 60,
+    )
+    assert result.returncode == 0, (
+        f"preflight --smoke returned rc={result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    # Offline checks must appear.
+    assert "Python version" in result.stdout
+    assert "MPS (Apple Silicon GPU)" in result.stdout
+    assert "Free disk space" in result.stdout
+    assert "Tree-sitter Swift parse" in result.stdout
+    # Network / model checks must NOT appear.
+    assert "Embedding model" not in result.stdout
+    assert "Smoke index" not in result.stdout
+    assert "Round-trip semantic_search" not in result.stdout
+    # Footer should NOT appear in smoke mode (it points at an
+    # unverified end-to-end path).
+    assert "Recommended DB path:" not in result.stdout
+
+
+def test_run_all_checks_smoke_returns_offline_results_only():
+    """Direct call into run_all_checks(smoke=True): only offline checks present."""
+    results, rc = preflight.run_all_checks(smoke=True)
+    names = {r.name for r in results}
+    # Offline checks present.
+    assert "Python version" in names
+    assert "Free disk space" in names
+    assert "Tree-sitter Swift parse" in names
+    # Network / model checks absent.
+    assert not any("Embedding model" in n for n in names)
+    assert not any("Smoke index" in n for n in names)
+    assert not any("Round-trip" in n for n in names)
+    assert rc in (0, 1)  # rc depends on the host (e.g. low disk would fail)
 
 
 # ---------------------------------------------------------------------------
