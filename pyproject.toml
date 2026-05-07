@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ios-graph-rag"
+version = "0.1.0"
+description = "High-Performance Static Artifact GraphRAG for iOS"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.27,<1.28",
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-swift>=0.7,<0.8",
+    "tree-sitter-objc>=3.0,<3.1",
+    "networkx>=3.6,<3.7",
+    "numpy>=2.4,<2.5",
+    "sentence-transformers>=5.4,<5.5",
+    "tqdm>=4.67,<4.68",
+    "einops>=0.8,<0.9",
+    "torch>=2.11,<2.12",
+]
+
+[project.scripts]
+ios-graphrag-index = "ios_graphrag.indexer:main"
+ios-graphrag-server = "ios_graphrag.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

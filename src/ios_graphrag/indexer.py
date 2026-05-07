@@ -1035,7 +1035,8 @@ def apply_rename(
 
 def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -> None:
     start_time = time.time()
-    schema_path = Path(__file__).resolve().parents[1] / "database" / "schema.sql"
+    # Repo layout: <repo>/src/ios_graphrag/indexer.py and <repo>/engine/database/schema.sql
+    schema_path = Path(__file__).resolve().parents[2] / "engine" / "database" / "schema.sql"
 
     conn = sqlite3.connect(db_path)
     ensure_schema(conn, schema_path)

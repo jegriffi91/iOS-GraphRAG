@@ -104,7 +104,7 @@ See the full setup guide: **[engine/CONNECTION_GUIDE.md](engine/CONNECTION_GUIDE
 
 2.  **Build the knowledge graph:**
     ```bash
-    uv run indexer.py --repo /path/to/your/ios-project
+    uv run ios-graphrag-index --repo /path/to/your/ios-project
     ```
 
 3.  **Register with your AI client** (Claude Desktop example):
@@ -112,8 +112,7 @@ See the full setup guide: **[engine/CONNECTION_GUIDE.md](engine/CONNECTION_GUIDE
     {
       "mcpServers": {
         "iOS-GraphRAG": {
-          "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
-          "args": ["/Users/YOUR_USER/tools/iOS-GraphRAG/server.py"],
+          "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server",
           "env": {
             "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
           }

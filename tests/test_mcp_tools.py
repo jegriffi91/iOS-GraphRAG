@@ -8,14 +8,10 @@ Validates:
 """
 import os
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-# Add engine/core to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "engine" / "core"))
 
 
 class TestTraceDependencies:

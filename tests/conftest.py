@@ -18,7 +18,6 @@ import pytest
 # Path constants
 PROJECT_ROOT = Path(__file__).parent.parent
 ENGINE_DIR = PROJECT_ROOT / "engine"
-CORE_DIR = ENGINE_DIR / "core"
 TEST_FIXTURES_DIR = PROJECT_ROOT / "test_fixtures" / "CalculatorApp"
 SCHEMA_PATH = ENGINE_DIR / "database" / "schema.sql"
 TEST_DB_PATH = PROJECT_ROOT / "test-knowledge-graph.sqlite"
@@ -42,11 +41,10 @@ def indexed_db_path() -> Generator[Path, None, None]:
     env["GRAPH_DB_PATH"] = str(TEST_DB_PATH)
     
     # Run the indexer on the test fixtures
-    indexer_script = CORE_DIR / "indexer.py"
     result = subprocess.run(
         [
             sys.executable,
-            str(indexer_script),
+            "-m", "ios_graphrag.indexer",
             "--repo", str(TEST_FIXTURES_DIR),
             "--db", str(TEST_DB_PATH),
             "--full"

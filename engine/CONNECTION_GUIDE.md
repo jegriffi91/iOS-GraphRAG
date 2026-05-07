@@ -36,7 +36,7 @@ uv pip install "mcp[cli]" tree-sitter tree-sitter-swift tree-sitter-objc \
 
 ```bash
 GRAPH_DB_PATH=/absolute/path/to/knowledge-graph.sqlite \
-  uv run indexer.py --repo /path/to/your/ios-project
+  uv run ios-graphrag-index --repo /path/to/your/ios-project
 ```
 
 This creates `knowledge-graph.sqlite`. **Write down its absolute path** — you need it next.
@@ -64,9 +64,7 @@ File: `~/.config/gh-copilot/config.yml`
 ```yaml
 mcp_servers:
   iOS-GraphRAG:
-    command: /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python
-    args:
-      - /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py
+    command: /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server
     env:
       GRAPH_DB_PATH: /Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite
 ```
@@ -78,8 +76,7 @@ Open via **⌘+Shift+P → "Open User Settings JSON"** and add:
 ```json
 "github.copilot.chat.mcp.servers": {
     "iOS-GraphRAG": {
-        "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
-        "args": ["/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py"],
+        "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server",
         "env": {
             "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
         }
@@ -95,10 +92,7 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "iOS-GraphRAG": {
-      "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python",
-      "args": [
-        "/Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py"
-      ],
+      "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server",
       "env": {
         "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
       }
@@ -113,8 +107,7 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```bash
 npx @modelcontextprotocol/inspector \
-  /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/python \
-  /Users/YOUR_USER/tools/iOS-GraphRAG/engine/core/server.py
+  /Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server
 ```
 
 1. Click the `trace_dependencies` tool.
@@ -137,7 +130,7 @@ cat /path/to/your/knowledge-graph-directory/server.log
 |---|---|---|
 | `FATAL: knowledge-graph.sqlite not found` | `GRAPH_DB_PATH` is wrong or missing | Use the **absolute** path to the `.sqlite` file |
 | `ModuleNotFoundError: No module named 'mcp'` | `command` points to system Python | Change it to `.venv/bin/python` |
-| `no such table: nodes` | DB is corrupt or wrong file | Re-run `indexer.py` |
+| `no such table: nodes` | DB is corrupt or wrong file | Re-run `ios-graphrag-index` |
 | SSL / `certificate verify failed` | Corporate proxy blocking downloads | See **Enterprise SSL** below |
 
 ### Enterprise SSL (Corporate Proxy)
@@ -168,6 +161,6 @@ cat /path/to/your/knowledge-graph-directory/server.log
 
 | Problem | Fix |
 |---|---|
-| Stale data after a big refactor | Re-run `indexer.py` |
+| Stale data after a big refactor | Re-run `ios-graphrag-index` |
 | MPS (Metal) not detected | Reinstall PyTorch per Step 1 |
 | Wrong Python version | Server needs 3.11+. Check: `.venv/bin/python --version` |
