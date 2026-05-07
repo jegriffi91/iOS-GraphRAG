@@ -313,7 +313,9 @@ P3.5 — Tone down tool descriptions.
 - Output: JSON to `benchmarks/results/<git-sha>-<timestamp>.json`.
 - Owner runs against a representative slice (start with 200k LOC, then full 1M).
 
-**Acceptance criteria for 4a:** harness runs locally on `test_fixtures/CalculatorApp` and produces a result JSON. Owner runs against the real repo and shares the results JSON for the next phases.
+**Acceptance criteria for 4a (✅ tool landed in commit 4e1fc5a; ⚠️ real-repo run pending owner):**
+- [x] Harness runs locally on `test_fixtures/CalculatorApp` and produces a result JSON. → smoke run produces JSON at `benchmarks/results/<sha>-<ts>.json` covering metadata + full_index + cold start + latency percentiles + memory.
+- [ ] Owner runs against the real repo (200k LOC slice, then full 1M) and shares the results JSON. → **pending**. The harness instruments `index_repository` via 10 DEBUG-level `PHASE_*` markers (no INFO-level pollution), uses `git stash` defensively for incremental measurement, and emits a `READY` log line in `server.py:303` for cold-start measurement. RSS unit handling documented in `benchmarks/README.md` (macOS bytes vs Linux kilobytes).
 
 #### Phase 4b — Eliminate per-incremental model reload (½ day)
 
@@ -373,6 +375,12 @@ Conditional on 4a results showing cold start >5s. Pick from:
   - <5% files with errors → Strategy A (tree-sitter primary, hardened fallback).
   - 5–20% → Strategy A + B (tree-sitter primary, SourceKitten validator in CI).
   - >20% → Strategy C (consider SourceKit-LSP as primary).
+
+**Acceptance criteria for 4.5a (✅ tool landed in commit 2d9c39b; ⚠️ real-repo run pending owner):**
+- [x] `tools/parse_audit.py` exists, walks repos, records `has_error` + ERROR/MISSING node counts per file, and aggregates summary stats. → 4 tests cover smoke against fixture, intentionally-broken Swift, empty dir, excluded dirs.
+- [x] Decision-matrix mapping (`<5%`/`5-20%`/`>=20%`) emits correct Strategy A / A+B / C recommendation. Boundary cases empirically verified (4.99% → A, 5.0% → A+B, 19.99% → A+B, 20.0% → C).
+- [x] Reproducible: JSON metadata records grammar versions (`tree-sitter`, `tree-sitter-swift`, `tree-sitter-objc`) so cross-run comparisons are valid.
+- [ ] Owner runs against the real repo (10k → 100k → full 1M) and decides Strategy A / A+B / C. → **pending**.
 
 #### Phase 4.5b — Strategy A: hardened fallback (1.5 days)
 
@@ -460,6 +468,14 @@ Expose via a new MCP tool, `find_swiftui_views`:
 - Indexer at startup: read schema version. If absent (legacy DB), apply baseline + all subsequent migrations. If newer than code knows, fail with clear error: `Database at vN, this build expects vM. Upgrade ios-graphrag or rebuild the index.`
 - Server at startup: same check; refuse to start on mismatch.
 - Tests: forward migration from v0 (legacy) → current; "old DB on new code" path is graceful.
+
+**Acceptance criteria for 6a (✅ landed in commit 681902b):**
+- [x] `schema_version` table created in baseline + 002_add_swiftui_columns.sql adds Phase 4.5d-ready nullable columns.
+- [x] Migration runner (`src/ios_graphrag/_migrations.py`) discovers `^\d{3}_*.sql$`, applies in numeric order inside an explicit BEGIN/COMMIT transaction, raises `SchemaMismatchError` if the DB is ahead of the code, swallows duplicate-column errors for partial-failure recovery.
+- [x] Indexer: `ensure_schema(conn, schema_path)` now delegates to `apply_migrations(conn)`. Backward-compatible signature.
+- [x] Server: `_check_schema_version_or_exit(db_path)` runs at startup, exits 1 with clear remediation pointer on either-direction mismatch.
+- [x] 5 tests cover fresh DB, legacy DB, newer-DB-refusal, idempotency, server-mismatch subprocess. All passing.
+- [x] Empirical verification: fresh DB lands at v2 with the 4 SwiftUI columns; true-shape legacy DB upgrades cleanly; server at v1 against v2 code refuses to start with `Database at v1, server expects v2. Run \`ios-graphrag-index --repo <repo> --db <db>\` to apply migrations.`
 
 #### Phase 6b — Structured logging + trace IDs (½ day)
 
