@@ -5,6 +5,17 @@ Validates:
 - trace_dependencies returns correct upstream/downstream
 - semantic_search finds relevant symbols
 - read_symbol returns correct code snippets
+
+The orientation test (``test_trace_dependencies_orientation_via_handler``)
+exercises ``ios_graphrag.server._trace_dependencies`` directly, using the
+indexed test database. It locks in the P1.1 fix: a regression that swaps
+``GRAPH.successors`` with ``GRAPH.predecessors`` in the handler is caught
+by this test even though the underlying SQL ``edges`` table is unchanged.
+
+Approach: ``server.py`` keeps the graph in module-level globals
+(``GRAPH``, ``NODE_META``). We clear and reload them inside the test
+under a ``GRAPH_DB_PATH`` env override so the handler's extension-map
+query also targets the indexed test database.
 """
 import os
 import sqlite3
@@ -102,8 +113,84 @@ class TestTraceDependencies:
     # orientation (successors into `upstream`). They were correctly named and
     # asserted under the new semantics; under the old code the test names were
     # misleading rather than wrong. The end-to-end orientation of
-    # `_trace_dependencies` is exercised manually during verification (see
-    # docs/PRODUCTION_ROADMAP.md P1.1 acceptance criteria).
+    # `_trace_dependencies` is exercised by the next test.
+
+    def test_trace_dependencies_orientation_via_handler(
+        self, indexed_db_path: Path, test_fixtures_path: Path
+    ):
+        """Direct smoke-test of ``server._trace_dependencies`` orientation.
+
+        Targets ``ScientificCalculator.swift`` because it has a clean
+        single-class shape:
+
+          * ScientificCalculator INHERITS Calculator
+              => Calculator must appear in ``upstream``
+                 (something this file depends on).
+          * Engine.evaluate CALLS calculate
+              => Engine.swift must appear in ``downstream``
+                 (something that depends on this file).
+
+        Catches the regression where someone re-swaps
+        ``GRAPH.successors``/``GRAPH.predecessors`` inside the handler:
+        the SQL ``edges`` table would be unchanged, so the existing
+        edge-table tests above wouldn't fire — but this one would.
+        """
+        from ios_graphrag import server
+
+        # The handler's extensions sub-query reads ``GRAPH_DB_PATH`` at
+        # call time. Point it at the test DB and clear module globals so
+        # we observe a clean load against the indexed fixture.
+        server.GRAPH.clear()
+        server.NODE_META.clear()
+        with patch.dict(os.environ, {"GRAPH_DB_PATH": str(indexed_db_path)}):
+            server.load_graph(str(indexed_db_path))
+
+            sci_path = (
+                test_fixtures_path
+                / "Sources" / "CalculatorApp" / "ScientificCalculator.swift"
+            )
+            result = server._trace_dependencies(file_path=str(sci_path))
+
+        # Shape assertions
+        assert "upstream" in result
+        assert "downstream" in result
+        assert "extensions" in result
+        assert "error" not in result, f"_trace_dependencies returned error: {result}"
+
+        # Upstream must contain the parent class via INHERITS edge.
+        upstream_inherits = [
+            e for e in result["upstream"]
+            if e.get("edge_type") == "INHERITS" and e.get("symbol") == "Calculator"
+        ]
+        assert upstream_inherits, (
+            "Calculator (parent class) missing from ScientificCalculator's upstream "
+            f"with edge_type=INHERITS. Got upstream={result['upstream']!r}"
+        )
+
+        # Downstream must include at least one entry from Engine.swift,
+        # because Engine.evaluate calls calculate (the resolved CALLS edge
+        # points back into ScientificCalculator.swift). The exact symbol
+        # name on the downstream side depends on how the indexer resolves
+        # name-collision overloads (P1.3 territory) — we only assert the
+        # FILE shows up in downstream, which is the orientation-sensitive
+        # piece of information.
+        downstream_files = {e.get("path") for e in result["downstream"]}
+        engine_path = str(
+            test_fixtures_path / "Sources" / "CalculatorApp" / "Engine.swift"
+        )
+        assert engine_path in downstream_files, (
+            "Engine.swift missing from downstream of ScientificCalculator.swift. "
+            f"Got downstream paths: {downstream_files!r}"
+        )
+
+        # Negative orientation check: Calculator (the parent) should NOT
+        # appear in downstream — that would mean someone swapped
+        # successors/predecessors back.
+        downstream_symbols = {e.get("symbol") for e in result["downstream"]}
+        assert "Calculator" not in downstream_symbols, (
+            "Calculator appeared in downstream — orientation regression. "
+            "This is the classic predecessors/successors swap bug."
+        )
 
 
 class TestEmbeddings:

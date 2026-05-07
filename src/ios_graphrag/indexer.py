@@ -211,46 +211,93 @@ def extract_signature_line(code_bytes: bytes, start_byte: int) -> str:
     return code_bytes[start_byte:line_end].decode("utf-8", errors="ignore").strip()
 
 
+def _extract_param_label(param_node) -> Optional[str]:
+    """Return the Swift external argument label for a single parameter node.
+
+    Swift parameter forms (and the label they expose to callers):
+
+        x: T                 -> "x"      (external == internal)
+        external internal: T -> "external"
+        _ name: T            -> "_"      (wildcard / unlabeled call site)
+
+    The Tree-sitter Swift grammar emits a literal ``_`` token for the wildcard
+    label. Different tree-sitter-swift versions classify it differently:
+    some emit a node whose ``type`` is the literal string ``"_"``; others
+    classify it as a ``simple_identifier`` whose text is ``"_"``. We treat
+    BOTH as a wildcard regardless of node type so the function does not
+    silently regress if the upstream grammar is updated.
+
+    The label-vs-internal-name disambiguation walks the parameter's children
+    in order, collecting "identifier-like" tokens (``simple_identifier`` and
+    the wildcard ``_``) until we hit the type colon ``:``. Two identifiers
+    means external+internal — return the FIRST. One identifier means the
+    same name is both external and internal — return it unchanged.
+    """
+    identifier_tokens: List[Tuple[str, str]] = []  # (kind, text); kind in {"wildcard", "name"}
+
+    for param_child in param_node.children:
+        # The colon separates the label/internal-name pair from the type.
+        # Anything after ``:`` is type info, modifiers, defaults — not labels.
+        if param_child.type == ":":
+            break
+
+        text = param_child.text.decode("utf-8", errors="ignore")
+
+        # Wildcard label: accept either a node typed ``"_"`` (some grammar
+        # versions) or a ``simple_identifier`` whose text is exactly ``"_"``
+        # (other grammar versions).
+        if param_child.type == "_" or (
+            param_child.type == "simple_identifier" and text == "_"
+        ):
+            identifier_tokens.append(("wildcard", "_"))
+            continue
+
+        if param_child.type == "simple_identifier":
+            identifier_tokens.append(("name", text))
+
+    if not identifier_tokens:
+        return None
+
+    # Two identifiers -> "external internal: T"; the FIRST is the call-site label.
+    # One identifier -> "x: T"; the only identifier is both label and internal name.
+    return identifier_tokens[0][1]
+
+
 def build_swift_selector(func_node) -> Optional[str]:
     """Build a Swift selector from a function declaration node.
-    
-    Swift selectors use the format: funcName(_:label:otherLabel:)
-    where _ represents unlabeled parameters and other labels are preserved.
-    
-    For example:
-        func test(_ something: String) -> "test(_:)"
-        func test(something: String) -> "test(something:)"
-        func login(email: String, password: String) -> "login(email:password:)"
+
+    Swift selectors use the format: ``funcName(_:label:otherLabel:)`` where
+    ``_`` represents unlabeled parameters and other labels are preserved.
+
+    Examples::
+
+        func test(_ something: String)         -> "test(_:)"
+        func test(something: String)           -> "test(something:)"
+        func login(email: String, password: String)
+                                               -> "login(email:password:)"
+        func foo(external internal: Int)       -> "foo(external:)"
+
+    Generic clauses (``<U>``), return types (``-> T``), and effect clauses
+    (``async``, ``throws``) are ignored — they don't appear in the Swift
+    selector.
     """
     func_name = None
     param_labels: List[str] = []
-    
+
     for child in func_node.children:
         if child.type == "simple_identifier" and func_name is None:
             func_name = child.text.decode("utf-8", errors="ignore")
-        
-        # Look for function parameters in the parameter list
-        elif child.type == "(":
-            # Find all parameter nodes after this
-            continue
         elif child.type == "parameter":
-            # Each parameter has: [external_label, internal_name, :, type]
-            # e.g., "email name: String" or "_ name: String"
-            label = None
-            for param_child in child.children:
-                if param_child.type == "simple_identifier":
-                    # First identifier is the external label (or internal if only one)
-                    label = param_child.text.decode("utf-8", errors="ignore")
-                    break
-            if label:
+            label = _extract_param_label(child)
+            if label is not None:
                 param_labels.append(label + ":")
-    
+
     if not func_name:
         return None
-    
+
     if not param_labels:
         return f"{func_name}()"
-    
+
     return f"{func_name}({''.join(param_labels)})"
 
 
