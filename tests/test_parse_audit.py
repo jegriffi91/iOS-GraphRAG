@@ -67,12 +67,13 @@ def test_audit_smoke_against_calculator_app(tmp_path: Path) -> None:
     assert md["tree_sitter_objc_version"] != "unknown"
 
     summary = payload["summary"]
-    # The fixture has 11 source files (10 .swift sources + Package.swift).
-    # Phase 5 P0 added PropertiesAndInit.swift, Phase 4.5d added
-    # SwiftUIPatterns.swift, Phase 5 P1 added EnumAndChains.swift. Locking
-    # the count guards against accidental fixture changes; bump on
-    # intentional additions.
-    assert summary["total_files"] == 11, f"fixture file count drifted: got {summary['total_files']}"
+    # The fixture has 14 source files (11 .swift sources + Package.swift +
+    # the Phase 5 P2 ObjC pair). Phase 5 P0 added PropertiesAndInit.swift,
+    # Phase 4.5d added SwiftUIPatterns.swift, Phase 5 P1 added
+    # EnumAndChains.swift, Phase 5 P2 added SubscriptsAndAliases.swift
+    # plus ObjCBridge/CalculatorMath.h and .m. Locking the count guards
+    # against accidental fixture changes; bump on intentional additions.
+    assert summary["total_files"] == 14, f"fixture file count drifted: got {summary['total_files']}"
     assert summary["files_with_has_error"] == 0
     assert summary["files_with_any_error_node"] == 0
     assert summary["files_with_any_error_node_percent"] == 0.0
@@ -81,7 +82,7 @@ def test_audit_smoke_against_calculator_app(tmp_path: Path) -> None:
     assert payload["top_files"] == []
     # All bins zero except "0".
     hist = summary["histogram_error_node_counts"]
-    assert hist["0"] == 11
+    assert hist["0"] == 14
     assert hist["1-5"] == hist["6-20"] == hist["21-100"] == hist["100+"] == 0
 
 

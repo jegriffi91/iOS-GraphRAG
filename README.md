@@ -41,7 +41,7 @@ The engine is designed around a fundamental principle:
 ## Symbol Types
 
 The `nodes.symbol_type` column tags every indexed symbol. The current set
-(constrained by a CHECK in migration 005):
+(constrained by a CHECK in migration 006):
 
 - `class` — Swift `class` declarations
 - `struct` — Swift `struct` declarations
@@ -58,6 +58,22 @@ The `nodes.symbol_type` column tags every indexed symbol. The current set
   produces one row per case). Cases with associated values get a call-site
   selector like `custom(name:fn:)`; bare and raw-valued cases have NULL
   selector.
+- `subscript` — Swift `subscript(...)` declarations. `symbol_name` is the
+  literal `subscript`; overloads are disambiguated via the selector column
+  (e.g. `subscript(key:)`, `subscript(index:withDefault:)`).
+- `typealias` — Swift `typealias` declarations (file scope or nested).
+  `selector` is NULL because typealiases are not invocable.
+- `objc_class` — Objective-C `@interface`/`@implementation` class
+  declarations. The header and implementation files each contribute one row.
+- `objc_method` — Objective-C method declarations and definitions
+  (both `-` instance and `+` class methods). `symbol_name` and `selector`
+  carry the canonical selector form (e.g. `addValue:toValue:`,
+  `sharedInstance`).
+- `objc_property` — Objective-C `@property` declarations.
+- `objc_protocol` — Objective-C `@protocol` declarations.
+- `category` — Objective-C category declarations (`@interface
+  CalculatorMath (Trig)`). `symbol_name` is the parenthesized category
+  name; the host class is captured separately as `objc_class`.
 
 ### SwiftUI enrichment columns
 

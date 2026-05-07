@@ -1174,6 +1174,78 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
             )
             return
 
+        # Handle subscript_declaration (Phase 5 P2). Symbol name is the
+        # literal "subscript" -- overloads are disambiguated by the
+        # selector, which mirrors function selectors via
+        # _extract_param_label. Examples:
+        #     subscript(key: String) -> Double?         -> "subscript(key:)"
+        #     subscript(index: Int, withDefault f: Double) -> Double
+        #                                                -> "subscript(index:withDefault:)"
+        # Tree-sitter-swift exposes parameters as direct ``parameter``
+        # children, so the same builder used for ``init`` works here.
+        if node_type == "subscript_declaration":
+            line_number = node.start_point[0] + 1
+            signature = extract_signature_line(code_bytes, node.start_byte)
+            param_labels: List[str] = []
+            for child in node.children:
+                if child.type == "parameter":
+                    label = _extract_param_label(child)
+                    if label is not None:
+                        param_labels.append(label + ":")
+            selector = f"subscript({''.join(param_labels)})"
+            symbols.append(
+                Symbol(
+                    file_path="",
+                    symbol_name="subscript",
+                    symbol_type="subscript",
+                    language="swift",
+                    start_byte=node.start_byte,
+                    end_byte=node.end_byte,
+                    line_number=line_number,
+                    signature=signature,
+                    inherits=[],
+                    conforms=[],
+                    extends=None,
+                    calls=[],
+                    selector=selector,
+                )
+            )
+            return
+
+        # Handle typealias_declaration (Phase 5 P2). The first
+        # ``type_identifier`` child is the alias name. Generic
+        # typealiases (``Result<T> = Swift.Result<T, Error>``) keep the
+        # bare name -- the type_identifier covers ``Result`` and the
+        # subsequent ``type_parameters`` is a separate sibling we do not
+        # walk into. selector stays NULL because typealiases are not
+        # invocable.
+        if node_type == "typealias_declaration":
+            alias_name: Optional[str] = None
+            for child in node.children:
+                if child.type == "type_identifier":
+                    alias_name = child.text.decode("utf-8", errors="ignore")
+                    break
+            if alias_name:
+                line_number = node.start_point[0] + 1
+                signature = extract_signature_line(code_bytes, node.start_byte)
+                symbols.append(
+                    Symbol(
+                        file_path="",
+                        symbol_name=alias_name,
+                        symbol_type="typealias",
+                        language="swift",
+                        start_byte=node.start_byte,
+                        end_byte=node.end_byte,
+                        line_number=line_number,
+                        signature=signature,
+                        inherits=[],
+                        conforms=[],
+                        extends=None,
+                        calls=[],
+                    )
+                )
+            return
+
         # Handle enum_entry (Phase 5 P1). One ``enum_entry`` node may declare
         # multiple cases on a single line (``case red, green, blue``); we
         # emit one Symbol per case name. For cases with associated values
@@ -1222,68 +1294,385 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
     return symbols, sorted(set(imports))
 
 
-def extract_objc_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
-    parser = Parser()
-    parser.language = Language(tree_sitter_objc.language())
-    symbols: List[Symbol] = []
+def _extract_objc_method_selector(method_node) -> Optional[str]:
+    """Build the canonical ObjC selector form for a method declaration/definition.
 
-    query_scm = """
-    (interface_declaration name: (identifier) @name) @decl
-    (protocol_declaration name: (identifier) @name) @decl
-    (implementation_definition name: (identifier) @name) @decl
-    (method_definition (identifier) @name) @decl
-    (property_declaration (identifier) @name) @decl
+    Tree-sitter-objc emits method nodes as a sequence of identifiers
+    interleaved with ``method_parameter`` children. The grammar shape is::
+
+        method_declaration / method_definition
+            - / +                        (instance vs class method)
+            method_type                  (return type, ignored)
+            identifier                   (selector keyword 1, e.g. "addValue")
+            method_parameter             (":(type)name" -- only present if
+                                          there is a colon-terminated keyword)
+            identifier                   (selector keyword 2, e.g. "toValue")
+            method_parameter
+            ...
+
+    Examples::
+
+        - (void)foo                        -> "foo"           (nullary)
+        - (double)addValue:(double)a       -> "addValue:"     (one keyword)
+        - (double)addValue:(double)a toValue:(double)b
+                                           -> "addValue:toValue:"
+
+    Returns ``None`` if no identifier child exists (defensive; should not
+    happen in well-formed source).
     """
-    try:
-        query = parser.language.query(query_scm)
-    except Exception as exc:
-        log_error("objc_query", f"Query error: {exc}")
-        return symbols, []
+    keyword_parts: List[str] = []
+    has_method_parameter = False
 
-    captures = query.captures(tree.root_node)
-    for node, tag in captures:
-        if tag != "name":
+    for child in method_node.children:
+        if child.type == "identifier":
+            # Every direct ``identifier`` child belongs to the selector.
+            # The grammar interleaves ``identifier`` and
+            # ``method_parameter`` so child order corresponds to
+            # selector keyword order.
+            keyword_parts.append(child.text.decode("utf-8", errors="ignore"))
+        elif child.type == "method_parameter":
+            has_method_parameter = True
+
+    if not keyword_parts:
+        return None
+
+    if not has_method_parameter:
+        # Nullary method like ``- (void)foo`` -- selector is just the
+        # identifier with no trailing colon.
+        return keyword_parts[0]
+
+    # Keyword method: every keyword gets a trailing colon.
+    return "".join(part + ":" for part in keyword_parts)
+
+
+def _extract_objc_property_name(property_node) -> Optional[str]:
+    """Return the declared name from an ObjC ``property_declaration`` node.
+
+    Tree-sitter-objc nests the name under
+    ``property_declaration > struct_declaration > struct_declarator``.
+    The declarator may be wrapped in a ``pointer_declarator`` (for
+    object-typed properties like ``NSString *name``) or be a bare
+    ``identifier`` (for primitive scalar properties like ``NSInteger
+    precision``). Both shapes resolve to the inner ``identifier`` whose
+    field name on its parent is ``declarator``.
+    """
+    for child in property_node.children:
+        if child.type != "struct_declaration":
             continue
-        parent = node.parent
-        symbol_type = {
-            "interface_declaration": "class",
-            "protocol_declaration": "protocol",
-            "implementation_definition": "class",
-            "method_definition": "function",
-            "property_declaration": "property",
-        }.get(parent.type)
-        if not symbol_type:
-            continue
-        symbol_name = node.text.decode("utf-8", errors="ignore")
-        signature = extract_signature_line(code_bytes, parent.start_byte)
-        line_number = parent.start_point[0] + 1
-        inherits: List[str] = []
-        conforms: List[str] = []
-        extends = None
-        if parent.type == "interface_declaration":
-            for child in parent.children:
-                if child.type == "superclass":
-                    inherits.append(
-                        normalize_type_name(child.text.decode("utf-8", errors="ignore").strip(": "))
+        for sub in child.children:
+            if sub.type != "struct_declarator":
+                continue
+            # Dig through optional pointer_declarator.
+            for inner in sub.children:
+                if inner.type == "identifier":
+                    return inner.text.decode("utf-8", errors="ignore")
+                if inner.type == "pointer_declarator":
+                    for deep in inner.children:
+                        if deep.type == "identifier":
+                            return deep.text.decode("utf-8", errors="ignore")
+    return None
+
+
+def extract_objc_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
+    """Extract symbols from Objective-C source via manual tree walking.
+
+    Mirrors ``extract_swift_symbols``: walks the tree-sitter-objc AST and
+    emits one ``Symbol`` per ``@interface``, ``@protocol``,
+    ``@implementation``, ``@property``, ``- / + method`` declaration. The
+    grammar (tree-sitter-objc 3.0.x) uses these node types:
+
+        class_interface       -> @interface block (and categories: when a
+                                 ``category`` field is present, emit a
+                                 ``category`` symbol for the parens name
+                                 instead of an ``objc_class``).
+        class_implementation  -> @implementation block (suppressed --
+                                 already emitted as objc_class via the
+                                 header; emitting again would double-count).
+        protocol_declaration  -> @protocol block.
+        property_declaration  -> @property line.
+        method_declaration    -> ``- / +`` method in a header.
+        method_definition     -> ``- / +`` method in an .m file (wrapped
+                                 in implementation_definition).
+
+    Methods get a canonical ObjC selector (``addValue:toValue:``) stored
+    in ``selector``. Categories carry the parenthesized name as their
+    symbol name (e.g. ``Trig``); the @category-on-@implementation form
+    follows the same rule for symmetry but is not emitted as an
+    ``objc_class`` -- it shares a row with the header declaration.
+    """
+    symbols: List[Symbol] = []
+    imports: List[str] = []
+    # Track which (class_name, category_name) categories we've already
+    # emitted so a category that exists in BOTH the header and the .m
+    # only produces one row in the index.
+    seen_categories: set = set()
+    # Track classes we've already emitted so a header + implementation
+    # pair produces one objc_class row, not two.
+    seen_classes: set = set()
+
+    def emit_methods(parent_node, parent_signature_line: int) -> None:
+        """Walk a class/protocol body and emit method/property symbols.
+
+        Methods may be wrapped in ``implementation_definition`` (for .m
+        files) or appear as bare ``method_declaration`` children (for
+        .h files). Properties are always direct children.
+        """
+        for child in parent_node.children:
+            method_node = None
+            if child.type == "method_declaration":
+                method_node = child
+            elif child.type == "implementation_definition":
+                # Implementation defs wrap the actual method_definition.
+                for inner in child.children:
+                    if inner.type == "method_definition":
+                        method_node = inner
+                        break
+            elif child.type == "method_definition":
+                method_node = child
+            elif child.type == "property_declaration":
+                prop_name = _extract_objc_property_name(child)
+                if prop_name:
+                    signature = extract_signature_line(code_bytes, child.start_byte)
+                    symbols.append(
+                        Symbol(
+                            file_path="",
+                            symbol_name=prop_name,
+                            symbol_type="objc_property",
+                            language="objc",
+                            start_byte=child.start_byte,
+                            end_byte=child.end_byte,
+                            line_number=child.start_point[0] + 1,
+                            signature=signature,
+                            inherits=[],
+                            conforms=[],
+                            extends=None,
+                            calls=[],
+                        )
                     )
-        symbols.append(
-            Symbol(
-                file_path="",
-                symbol_name=symbol_name,
-                symbol_type=symbol_type,
-                language="objc",
-                start_byte=parent.start_byte,
-                end_byte=parent.end_byte,
-                line_number=line_number,
-                signature=signature,
-                inherits=inherits,
-                conforms=conforms,
-                extends=extends,
-                calls=[],
-            )
-        )
+                continue
 
-    return symbols, []
+            if method_node is None:
+                continue
+
+            selector = _extract_objc_method_selector(method_node)
+            if selector is None:
+                continue
+            # Bare-keyword (nullary) selector: ``init`` -> name "init",
+            # selector "init". Keyword-with-colons selector:
+            # ``addValue:toValue:`` -> name "addValue:toValue:" (the
+            # whole selector, since ObjC has no name-vs-call-site
+            # distinction the way Swift does), selector
+            # "addValue:toValue:".
+            symbols.append(
+                Symbol(
+                    file_path="",
+                    symbol_name=selector,
+                    symbol_type="objc_method",
+                    language="objc",
+                    start_byte=method_node.start_byte,
+                    end_byte=method_node.end_byte,
+                    line_number=method_node.start_point[0] + 1,
+                    signature=extract_signature_line(code_bytes, method_node.start_byte),
+                    inherits=[],
+                    conforms=[],
+                    extends=None,
+                    calls=[],
+                    selector=selector,
+                )
+            )
+        # parent_signature_line is unused by the inner loop but kept in
+        # the signature to mirror the Swift extractor's structure for
+        # future per-row signature overrides.
+        _ = parent_signature_line
+
+    def walk(node) -> None:
+        node_type = node.type
+
+        if node_type == "preproc_include":
+            # ObjC #import <Foundation/Foundation.h> -- record the bare
+            # framework name (first path component without extension)
+            # so the bridging-edges resolver has something to work
+            # with. Defensive: not all includes have a parseable
+            # path, so skip when the structure is unusual.
+            for child in node.children:
+                if child.type in {"system_lib_string", "string_literal"}:
+                    raw = child.text.decode("utf-8", errors="ignore").strip("<>\"")
+                    head = raw.split("/", 1)[0]
+                    head = head.rsplit(".", 1)[0]
+                    if head:
+                        imports.append(head)
+                    break
+            return
+
+        if node_type == "class_interface":
+            class_name: Optional[str] = None
+            category_name: Optional[str] = None
+            superclass: Optional[str] = None
+            for i, child in enumerate(node.children):
+                field = node.field_name_for_child(i)
+                if field == "superclass" and child.type == "identifier":
+                    superclass = child.text.decode("utf-8", errors="ignore")
+                elif field == "category" and child.type == "identifier":
+                    category_name = child.text.decode("utf-8", errors="ignore")
+                elif (
+                    field is None
+                    and child.type == "identifier"
+                    and class_name is None
+                ):
+                    class_name = child.text.decode("utf-8", errors="ignore")
+            if class_name is None:
+                return
+
+            line_number = node.start_point[0] + 1
+            signature = extract_signature_line(code_bytes, node.start_byte)
+
+            if category_name is not None:
+                key = (class_name, category_name)
+                if key not in seen_categories:
+                    seen_categories.add(key)
+                    symbols.append(
+                        Symbol(
+                            file_path="",
+                            symbol_name=category_name,
+                            symbol_type="category",
+                            language="objc",
+                            start_byte=node.start_byte,
+                            end_byte=node.end_byte,
+                            line_number=line_number,
+                            signature=signature,
+                            inherits=[],
+                            conforms=[],
+                            extends=class_name,
+                            calls=[],
+                        )
+                    )
+            else:
+                if class_name not in seen_classes:
+                    seen_classes.add(class_name)
+                    inherits: List[str] = []
+                    if superclass:
+                        inherits.append(normalize_type_name(superclass))
+                    symbols.append(
+                        Symbol(
+                            file_path="",
+                            symbol_name=class_name,
+                            symbol_type="objc_class",
+                            language="objc",
+                            start_byte=node.start_byte,
+                            end_byte=node.end_byte,
+                            line_number=line_number,
+                            signature=signature,
+                            inherits=inherits,
+                            conforms=[],
+                            extends=None,
+                            calls=[],
+                        )
+                    )
+
+            emit_methods(node, line_number)
+            return
+
+        if node_type == "class_implementation":
+            class_name = None
+            category_name = None
+            for i, child in enumerate(node.children):
+                field = node.field_name_for_child(i)
+                if field == "category" and child.type == "identifier":
+                    category_name = child.text.decode("utf-8", errors="ignore")
+                elif field is None and child.type == "identifier" and class_name is None:
+                    class_name = child.text.decode("utf-8", errors="ignore")
+            if class_name is None:
+                return
+
+            line_number = node.start_point[0] + 1
+            signature = extract_signature_line(code_bytes, node.start_byte)
+
+            if category_name is not None:
+                key = (class_name, category_name)
+                if key not in seen_categories:
+                    seen_categories.add(key)
+                    symbols.append(
+                        Symbol(
+                            file_path="",
+                            symbol_name=category_name,
+                            symbol_type="category",
+                            language="objc",
+                            start_byte=node.start_byte,
+                            end_byte=node.end_byte,
+                            line_number=line_number,
+                            signature=signature,
+                            inherits=[],
+                            conforms=[],
+                            extends=class_name,
+                            calls=[],
+                        )
+                    )
+            else:
+                if class_name not in seen_classes:
+                    seen_classes.add(class_name)
+                    symbols.append(
+                        Symbol(
+                            file_path="",
+                            symbol_name=class_name,
+                            symbol_type="objc_class",
+                            language="objc",
+                            start_byte=node.start_byte,
+                            end_byte=node.end_byte,
+                            line_number=line_number,
+                            signature=signature,
+                            inherits=[],
+                            conforms=[],
+                            extends=None,
+                            calls=[],
+                        )
+                    )
+
+            emit_methods(node, line_number)
+            return
+
+        if node_type == "protocol_declaration":
+            protocol_name: Optional[str] = None
+            for child in node.children:
+                if child.type == "identifier":
+                    protocol_name = child.text.decode("utf-8", errors="ignore")
+                    break
+            if protocol_name:
+                line_number = node.start_point[0] + 1
+                signature = extract_signature_line(code_bytes, node.start_byte)
+                conforms: List[str] = []
+                for child in node.children:
+                    if child.type == "protocol_reference_list":
+                        for inner in child.children:
+                            if inner.type == "identifier":
+                                conforms.append(
+                                    normalize_type_name(
+                                        inner.text.decode("utf-8", errors="ignore")
+                                    )
+                                )
+                symbols.append(
+                    Symbol(
+                        file_path="",
+                        symbol_name=protocol_name,
+                        symbol_type="objc_protocol",
+                        language="objc",
+                        start_byte=node.start_byte,
+                        end_byte=node.end_byte,
+                        line_number=line_number,
+                        signature=signature,
+                        inherits=[],
+                        conforms=conforms,
+                        extends=None,
+                        calls=[],
+                    )
+                )
+                emit_methods(node, line_number)
+            return
+
+        for child in node.children:
+            walk(child)
+
+    walk(tree.root_node)
+    return symbols, sorted(set(imports))
 
 
 def fallback_regex_parse(text: str, encoding: str, file_path: str) -> List[Symbol]:
@@ -1687,7 +2076,16 @@ def build_edges_for_file(
                 target_id = target_ids[0] if target_ids else None
             edges.append((source_id, target_id, callee, "CALLS", symbol.line_number))
 
-        if imports and symbol.symbol_type in {"class", "struct", "protocol", "enum", "extension"}:
+        if imports and symbol.symbol_type in {
+            "class",
+            "struct",
+            "protocol",
+            "enum",
+            "extension",
+            "objc_class",
+            "objc_protocol",
+            "category",
+        }:
             for module in imports:
                 edges.append((source_id, None, module, "IMPORTS", symbol.line_number))
 
@@ -1777,7 +2175,7 @@ def rebuild_bridging_edges(
                 """
                 SELECT id, symbol_name
                 FROM nodes
-                WHERE symbol_type = 'class' AND language = 'objc'
+                WHERE symbol_type = 'objc_class'
                 """
             )
         }
