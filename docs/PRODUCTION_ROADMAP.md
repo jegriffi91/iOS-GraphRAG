@@ -234,14 +234,14 @@ P2.3 — `--cert-bundle` CLI flag.
 - Add to `ios-graphrag-index` and `ios-graphrag-server` CLIs: `--cert-bundle PATH` sets `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` for the duration of the process.
 - Document in `CONNECTION_GUIDE.md`.
 
-**Acceptance criteria:**
-- Default invocation (no env vars) verifies TLS against a real PyPI/HF endpoint.
-- With `GRAPHRAG_INSECURE_TLS=1`, bypass is active and a WARNING is logged.
-- With `--cert-bundle ./corp.pem`, the cert is used and verification stays on.
-- Search the codebase for `_create_unverified_https_context`: no calls outside `_tls.py`.
+**Acceptance criteria (✅ Phase 2 landed in commit 41dc0ff):**
+- [x] Default invocation (no env vars) verifies TLS against a real PyPI/HF endpoint. → smoke run with no env var produced 0 "TLS verification disabled" lines (gate 7 verified).
+- [x] With `GRAPHRAG_INSECURE_TLS=1`, bypass is active and a WARNING is logged. → smoke run produced exactly 1 WARNING line (gate 6 verified).
+- [x] With `--cert-bundle ./corp.pem`, the cert is used and verification stays on. → `tests/test_tls_config.py::test_cert_bundle_sets_env_vars` verified (REQUESTS_CA_BUNDLE + SSL_CERT_FILE both set to abs path; ssl context unchanged).
+- [x] Search the codebase for `_create_unverified_https_context`: no calls outside `_tls.py`. → grep against `src/ios_graphrag/` returns hits only in `_tls.py`; `tests/test_tls_config.py` has the assertion-string mention but is itself the regression-posture test.
 
-**Effort:** 1 day.
-**Dependencies:** Phase 0 (path changes); independent of Phase 1.
+**Effort:** 1 day. → matched.
+**Dependencies:** Phase 0 (path changes); independent of Phase 1. → satisfied.
 
 ---
 
