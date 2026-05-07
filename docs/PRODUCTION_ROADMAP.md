@@ -317,11 +317,13 @@ P3.5 — Tone down tool descriptions.
 - [x] Harness runs locally on `test_fixtures/CalculatorApp` and produces a result JSON. → smoke run produces JSON at `benchmarks/results/<sha>-<ts>.json` covering metadata + full_index + cold start + latency percentiles + memory.
 - [ ] Owner runs against the real repo (200k LOC slice, then full 1M) and shares the results JSON. → **pending**. The harness instruments `index_repository` via 10 DEBUG-level `PHASE_*` markers (no INFO-level pollution), uses `git stash` defensively for incremental measurement, and emits a `READY` log line in `server.py:303` for cold-start measurement. RSS unit handling documented in `benchmarks/README.md` (macOS bytes vs Linux kilobytes).
 
-#### Phase 4b — Eliminate per-incremental model reload (½ day)
+#### Phase 4b — Eliminate per-incremental model reload (½ day) ✅ landed
 
-- Audit whether the SSL/httpx contamination concern that motivated `embed_signatures` (`indexer.py:736-747`) still applies with current `sentence-transformers`.
-- If not, run the embedding model in-process. Add a benchmark before/after.
-- If it still applies, restructure as a long-lived embedding daemon (separate process, persistent socket).
+- Audit (commit on this branch) loaded `SentenceTransformer` two and three times back-to-back in one process under the pinned `sentence-transformers 5.4 / torch 2.11 / huggingface_hub 1.14 / httpx 0.28` set: bit-identical embeddings, no measurable RSS leak across the model lifetimes (~70 MB cumulative growth across 3 distinct loads, expected MPS allocator behavior). The original isolation (`_generate_embeddings_worker` + `ProcessPoolExecutor(spawn)`) was load-bearing only against the pre-Phase-2 unconditional SSL bypass, which is no longer present.
+- Refactored: `embed_signatures` now invokes the model in-process via `_load_model()`, which caches a module-level singleton (`indexer._MODEL_CACHE`). The TLS opt-in via `_tls.configure_insecure_tls_if_requested` already runs in `main()`, so an in-process model load picks up the same posture transparently.
+- Benchmark on `test_fixtures/CalculatorApp` (56 symbols): `full_index.wall_seconds` 18.46s → 15.26s (−17%); `phases.embed_seconds` 8.38s → 5.53s (−34%). A second same-process `index_repository` call (Phase 4c watcher pattern) drops from 13.41s → 8.16s (−39%) because the cached model skips the reload.
+- Tests: `tests/test_embeddings.py` (7 cases) cover the in-process invariant, model caching, env-var resolution, cache invalidation on path change, and a static guard against `ProcessPoolExecutor` re-introduction in the embedding hot path.
+- `_generate_embeddings_worker` deleted; subprocess fallback intentionally NOT preserved — its only justification was the pre-Phase-2 SSL bypass, which has been gone for two phases.
 
 #### Phase 4c — Indexer daemon + file watcher (1.5 days)
 

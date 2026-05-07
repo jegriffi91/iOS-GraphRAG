@@ -111,6 +111,37 @@ ALLOWED_EXTS = {".swift", ".h", ".m"}
 log = logging.getLogger(__name__)
 
 
+# Phase 4b: cached in-process SentenceTransformer singleton.
+#
+# The previous implementation spawned a fresh ``multiprocessing.spawn``
+# subprocess for every ``embed_signatures`` call and reloaded the ~500 MB
+# model from disk inside it. The original justification — avoiding
+# 'client has been closed' errors from a stale httpx/huggingface_hub
+# state and isolating any unconditional SSL bypass — no longer applies:
+#
+#   * Phase 2 moved all SSL/TLS bypass behind ``_tls.configure_insecure_tls_if_requested``,
+#     which is opt-in via ``GRAPHRAG_INSECURE_TLS=1``. Default posture is
+#     verify-on, so there's no unconditional state to isolate.
+#   * Under the pinned versions (``sentence-transformers>=5.4,<5.5``,
+#     ``torch>=2.11,<2.12``, ``huggingface_hub 1.14``, ``httpx 0.28``),
+#     loading the model two or three times back-to-back in one process
+#     completes cleanly with bit-identical embeddings and no measurable
+#     RSS leak. Verified empirically in the Phase 4b audit probe.
+#
+# Pattern: lazy load on first ``embed_signatures`` call; cache on
+# ``_MODEL_CACHE``. ``index_repository`` invocations within the same
+# Python process reuse the same model object — important for the
+# Phase 4c watcher daemon, which keeps a single process alive across
+# many incremental reindexes.
+#
+# Concurrency: the indexer runs single-threaded over the embed phase
+# (``store_embeddings`` is called once per ``index_repository``), so
+# no lock is needed. If a future caller threads it, switch to a
+# ``threading.Lock`` around the load.
+_MODEL_CACHE: Optional["SentenceTransformer"] = None
+_MODEL_CACHE_PATH: Optional[str] = None
+
+
 @dataclass(frozen=True)
 class SymbolKey:
     file_path: str
@@ -791,33 +822,25 @@ def chunked(iterable: List[str], size: int) -> Iterable[List[str]]:
         yield iterable[i : i + size]
 
 
-def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
-    """Worker function to generate embeddings in a separate process.
+def _load_model() -> "SentenceTransformer":
+    """Load (or return the cached) ``SentenceTransformer``.
 
-    This is isolated to ensure a fresh httpx/huggingface_hub client state,
-    avoiding 'client has been closed' errors.
+    Resolves the model path via the documented precedence
+    (``$IOS_GRAPHRAG_MODEL_DIR`` → ``~/.cache/ios-graphrag/models`` → HF id),
+    plus the legacy in-repo ``models/`` snapshot fallback for backward
+    compatibility.
 
-    The worker re-applies the GRAPHRAG_INSECURE_TLS opt-in so that bypass
-    propagates into the spawned interpreter. Env vars set in the parent are
-    inherited by ``multiprocessing.spawn`` children, so simply re-running the
-    same gating logic gives the worker the same TLS posture as its parent
-    without ever bypassing TLS unconditionally.
+    The loaded model is cached on a module-level singleton so subsequent
+    ``embed_signatures`` calls reuse it.  If the resolved model path
+    changes between calls (e.g. an env-var override flipped on), the cache
+    is invalidated and the model reloaded.
+
+    Phase 4b note: this function runs in the indexer's parent process; any
+    TLS posture configured by ``_tls.configure_insecure_tls_if_requested``
+    in ``main()`` is already in effect and applies transparently to the
+    HF download path.
     """
-    if not signatures:
-        return []
-
-    # Phase 6b: the spawned worker is its own Python process — it does not
-    # see the parent's ``setup_logging`` call. Re-initialize the same logger
-    # chain here so worker log lines (notably "model loaded from ...", the
-    # offline-override confirmation) land in both the parent's stderr and
-    # the rotating ``~/Library/Logs/ios-graphrag/indexer.log`` file. The
-    # ``setup_logging`` helper is idempotent: re-calling it from a worker
-    # detaches any stale handlers and reattaches a clean pair.
-    from ._logging import setup_logging as _setup_logging
-
-    _setup_logging("indexer")
-
-    _tls.configure_insecure_tls_if_requested()
+    global _MODEL_CACHE, _MODEL_CACHE_PATH
 
     # Resolve the model path/identifier with the documented precedence
     # ($IOS_GRAPHRAG_MODEL_DIR → ~/.cache/ios-graphrag/models → HF id).
@@ -844,7 +867,9 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
                     model_path = os.path.join(snapshots_dir, snapshots[0])
                     log.info(f"model loaded from in-repo snapshot: {model_path}")
 
-    # Re-import to ensure clean state in worker
+    if _MODEL_CACHE is not None and _MODEL_CACHE_PATH == model_path:
+        return _MODEL_CACHE
+
     import torch
 
     model = SentenceTransformer(model_path, trust_remote_code=True)
@@ -854,27 +879,33 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     except Exception:
         pass
 
+    _MODEL_CACHE = model
+    _MODEL_CACHE_PATH = model_path
+    return model
+
+
+def embed_signatures(signatures: List[str]) -> List[np.ndarray]:
+    """Generate embeddings in-process using a cached SentenceTransformer.
+
+    Phase 4b refactor: previously this spawned a one-shot
+    ``ProcessPoolExecutor`` (with a ``multiprocessing.spawn`` context) and
+    reloaded the model from disk for every call.  The audit found the
+    contamination concerns that motivated that isolation no longer apply
+    under the pinned ``sentence-transformers``/``torch``/``huggingface_hub``
+    versions, so the model now lives in the parent process and is cached
+    on a module-level singleton across calls.
+    """
+    if not signatures:
+        return []
+
+    model = _load_model()
+
     embeddings: List[np.ndarray] = []
     for i in range(0, len(signatures), BATCH_SIZE):
         batch = signatures[i : i + BATCH_SIZE]
         batch_embeddings = model.encode(batch, convert_to_numpy=True)
         embeddings.extend(batch_embeddings)
     return embeddings
-
-
-def embed_signatures(signatures: List[str]) -> List[np.ndarray]:
-    """Generate embeddings using a separate process to avoid httpx conflicts."""
-    if not signatures:
-        return []
-
-    import multiprocessing
-
-    # Use 'spawn' context to create a truly fresh process (not fork)
-    # This avoids inheriting broken httpx client state from parent process
-    ctx = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
-        future = executor.submit(_generate_embeddings_worker, signatures)
-        return future.result()
 
 
 def update_file_index(

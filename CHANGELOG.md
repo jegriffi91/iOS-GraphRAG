@@ -6,8 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Performance
+- **Phase 4b** — embedding model now loads in-process and is cached on a
+  module-level singleton. Removed `_generate_embeddings_worker` and the
+  per-call `multiprocessing.spawn` ProcessPoolExecutor that previously
+  reloaded the ~500 MB model from disk every invocation. Audit
+  (probe in `tests/test_embeddings.py`) found the SSL/httpx
+  contamination concerns motivating the original isolation no longer
+  apply under the pinned `sentence-transformers 5.4` /
+  `torch 2.11` / `huggingface_hub 1.14` versions, and the Phase 2 TLS
+  refactor already moved bypass behind an opt-in env var. On
+  `test_fixtures/CalculatorApp` (56 symbols), the benchmark harness
+  reports `full_index.wall_seconds` 18.46s → 15.26s (−17%) and
+  `phases.embed_seconds` 8.38s → 5.53s (−34%). Larger wins land in
+  Phase 4c where the watcher daemon will reuse the loaded model across
+  many incremental deltas (a same-process second `index_repository`
+  call already drops from 13.41s → 8.16s).
+
 ### Planned
-- Phase 4b: in-process embedding model load (eliminate per-incremental subprocess reload).
 - Phase 4c: indexer daemon + file watcher (`ios-graphrag-watch`).
 - Phase 4.5b/c/d: parser strategy + SwiftUI symbol enrichment.
 - Phase 5: coverage gaps (properties, SwiftUI views, property wrappers, init/deinit, trailing closures, enum cases).
