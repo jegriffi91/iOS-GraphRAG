@@ -38,6 +38,24 @@ The engine is designed around a fundamental principle:
 
 ---
 
+## Symbol Types
+
+The `nodes.symbol_type` column tags every indexed symbol. The current set
+(constrained by a CHECK in migration 004):
+
+- `class` — Swift `class` declarations
+- `struct` — Swift `struct` declarations
+- `protocol` — Swift `protocol` declarations
+- `enum` — Swift `enum` declarations
+- `function` — Swift `func` declarations (free functions and methods)
+- `extension` — Swift `extension` blocks
+- `property` — stored properties (`var`/`let`), including `lazy` and `static`
+- `computed_property` — properties with a getter/setter block
+- `initializer` — `init` declarations (plain, failable, convenience, required)
+- `deinitializer` — `deinit` blocks
+
+---
+
 ## MCP Tools
 
 The server exposes four tools to AI clients via the Model Context Protocol:

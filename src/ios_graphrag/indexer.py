@@ -489,6 +489,51 @@ def extract_inheritance_types(node, code_bytes: bytes) -> List[str]:
     return [t for t in types if t]
 
 
+def extract_property_name(prop_node) -> Optional[str]:
+    """Return the bound name from a Swift ``property_declaration`` node.
+
+    The Tree-sitter Swift grammar nests the bound identifier inside a
+    ``pattern`` child::
+
+        property_declaration
+          value_binding_pattern (var | let)
+          pattern
+            simple_identifier   <- the name we want
+          type_annotation
+          [computed_property | willset_didset_block | initializer]
+
+    Tuple bindings (``let (x, y) = ...``) produce a ``pattern`` whose
+    children are themselves nested ``pattern`` nodes; we don't try to
+    decompose those — we return ``None`` and the caller skips the
+    declaration. Protocol property requirements use a different node
+    type (``protocol_property_declaration``), which this function is
+    NOT called on.
+    """
+    for child in prop_node.children:
+        if child.type != "pattern":
+            continue
+        # Look for a single simple_identifier directly under pattern.
+        ident_children = [c for c in child.children if c.type == "simple_identifier"]
+        if len(ident_children) == 1 and not any(c.type == "pattern" for c in child.children):
+            return ident_children[0].text.decode("utf-8", errors="ignore")
+        # Tuple binding (multiple nested patterns) -- not supported here.
+        return None
+    return None
+
+
+def is_computed_property(prop_node) -> bool:
+    """Return True if the ``property_declaration`` has a getter/setter block.
+
+    Tree-sitter Swift represents both the simple-body form
+    (``var foo: Int { return 5 }``) and the explicit get/set form
+    (``var foo: Int { get { ... } set { ... } }``) with a child node of
+    type ``computed_property``. The observer-only form
+    (``var foo: T = init { didSet { ... } }``) uses
+    ``willset_didset_block`` and is treated as a stored property.
+    """
+    return any(child.type == "computed_property" for child in prop_node.children)
+
+
 def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
     """Extract symbols from Swift code using manual tree walking.
 
@@ -651,6 +696,102 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         selector=selector,
                     )
                 )
+            return
+
+        # Handle property_declaration (Phase 5 P0). Captures stored, computed,
+        # observed, lazy, and static properties. Distinguishes the
+        # 'computed_property' kind via is_computed_property() (presence of a
+        # getter/setter block); everything else is 'property'. Tuple bindings
+        # like ``let (x, y) = ...`` return None from extract_property_name and
+        # are silently skipped (rare in iOS Swift, complex to map 1-to-1).
+        if node_type == "property_declaration":
+            prop_name = extract_property_name(node)
+            if prop_name:
+                signature = extract_signature_line(code_bytes, node.start_byte)
+                line_number = node.start_point[0] + 1
+                prop_kind = "computed_property" if is_computed_property(node) else "property"
+                symbols.append(
+                    Symbol(
+                        file_path="",
+                        symbol_name=prop_name,
+                        symbol_type=prop_kind,
+                        language="swift",
+                        start_byte=node.start_byte,
+                        end_byte=node.end_byte,
+                        line_number=line_number,
+                        signature=signature,
+                        inherits=[],
+                        conforms=[],
+                        extends=None,
+                        calls=[],
+                    )
+                )
+            return
+
+        # Handle init_declaration (Phase 5 P0). Covers plain init, failable
+        # init?, throwing init, and modifier-tagged inits (convenience,
+        # required, override). Symbol name is the literal "init"; the parent
+        # type plus selector disambiguate overloads. Selector reuses the
+        # existing build_swift_selector machinery -- it walks "simple_identifier"
+        # for the function name, but tree-sitter-swift emits "init" as a
+        # keyword token, so we override the name to "init" while still
+        # collecting parameter labels via _extract_param_label.
+        if node_type == "init_declaration":
+            line_number = node.start_point[0] + 1
+            signature = extract_signature_line(code_bytes, node.start_byte)
+            param_labels: List[str] = []
+            for child in node.children:
+                if child.type == "parameter":
+                    label = _extract_param_label(child)
+                    if label is not None:
+                        param_labels.append(label + ":")
+            if param_labels:
+                selector = f"init({''.join(param_labels)})"
+            else:
+                selector = "init()"
+            symbols.append(
+                Symbol(
+                    file_path="",
+                    symbol_name="init",
+                    symbol_type="initializer",
+                    language="swift",
+                    start_byte=node.start_byte,
+                    end_byte=node.end_byte,
+                    line_number=line_number,
+                    signature=signature,
+                    inherits=[],
+                    conforms=[],
+                    extends=None,
+                    calls=[],
+                    selector=selector,
+                )
+            )
+            return
+
+        # Handle deinit_declaration (Phase 5 P0). Deinitializers take no
+        # parameters and are unique within their declaring type, so the
+        # symbol name "deinit" plus file_path + parent type uniquely
+        # identify the row. Selector is left NULL because deinit has no
+        # call-site form (it's invoked implicitly by ARC).
+        if node_type == "deinit_declaration":
+            line_number = node.start_point[0] + 1
+            signature = extract_signature_line(code_bytes, node.start_byte)
+            symbols.append(
+                Symbol(
+                    file_path="",
+                    symbol_name="deinit",
+                    symbol_type="deinitializer",
+                    language="swift",
+                    start_byte=node.start_byte,
+                    end_byte=node.end_byte,
+                    line_number=line_number,
+                    signature=signature,
+                    inherits=[],
+                    conforms=[],
+                    extends=None,
+                    calls=[],
+                )
+            )
             return
 
         # Recurse into children
