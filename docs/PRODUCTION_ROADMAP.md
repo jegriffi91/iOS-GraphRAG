@@ -77,8 +77,8 @@ README prose says upstream = "this file inherits from / conforms to," downstream
 
 ### 2.2 Correctness concerns to verify and fix
 
-**V1. Swift selector for unlabeled parameters is likely wrong.**
-`build_swift_selector` (`engine/core/indexer.py:223-249`) walks parameter children and grabs the first `simple_identifier` as the label. For `func test(_ something: String)`, the `_` is a literal token, not a `simple_identifier`, so the first match is `something`, yielding selector `test(something:)` instead of `test(_:)`. That collides with the actual `test(something:)` overload in `OverloadCases.swift`. The corresponding test (`tests/test_function_calls.py:104-125`) asserts `edge["selector"] == "test(_:)"`. Must verify with a real run, then fix.
+**V1. Swift selector for unlabeled parameters — defensively refactored in Phase 1 P1.2 (commit `78f171c`).**
+The roadmap's original concern was that `build_swift_selector` (`engine/core/indexer.py:223-249`) walked parameter children, grabbed the first `simple_identifier` as the label, and would yield `test(something:)` for `func test(_ something: String)` — colliding with the `test(something: String)` overload. **Empirical finding:** the locked grammar (`tree-sitter-swift>=0.7,<0.8`) emits `_` as a `simple_identifier` whose `text` is `"_"`, so the original code's "break after first `simple_identifier`" accidentally produced the correct selector (`test(_:)`). All 28 baseline tests passed under the OLD code. The bug as described did **not** exist in this codebase. Phase 1 P1.2 instead landed a defensive refactor: extracted `_extract_param_label` helper (`src/ios_graphrag/indexer.py:214-260`) that explicitly checks for wildcard text, plus 19 parametric tests in `tests/test_selectors.py` covering all parameter shapes. A future grammar update that types `_` as a different node type cannot now silently break selector emission.
 
 **V2. `name_map` and `selector_map` silently pick the first match.**
 `update_unresolved_edges:993` and `resolve_selector_ids:818-823` store one node per name. In a 1M-LOC monorepo there will be many same-named types/selectors across modules. INHERITS/CONFORMS edges resolve non-deterministically.
@@ -154,18 +154,18 @@ P0.5 — Pin dependencies.
 - `engine/pyproject.toml:7-17`: pin minor versions for `mcp`, `tree-sitter`, `tree-sitter-swift`, `tree-sitter-objc`, `networkx`, `numpy`, `sentence-transformers`, `tqdm`, `einops`, `torch`.
 - Commit `uv.lock`.
 
-**Acceptance criteria:**
-- `git ls-files | wc -l` drops from ~1339 to ~30.
-- Repo size on disk <2 MB.
-- Fresh clone + `uv sync` + `pytest tests/` succeeds without modifying anything.
-- `ios-graphrag-server --help` works.
+**Acceptance criteria (✅ Phase 0 landed in commits 578e7ed, 85550b4, 5043757):**
+- [x] `git ls-files | wc -l` drops from ~1339 to ~30. → 25 (verified).
+- [x] Repo size on disk <2 MB. → trivially met (25 tracked files).
+- [x] Fresh clone + `uv sync` + `pytest tests/` succeeds without modifying anything. → 28 passed.
+- [x] `ios-graphrag-server --help` works. → both `ios-graphrag-server` and `ios-graphrag-index --help` work.
 
 **Effort:** 4 hours.
 **Dependencies:** none.
 
 ---
 
-### Phase 1 — Correctness Fixes (2 days)
+### Phase 1 — Correctness Fixes (2 days) ✅ landed in commits 234f54a, 78f171c, 992bdfc
 
 **Goal:** Stop the bleeding before adding features. Existing test suite stays green; new tests added for each fix.
 
@@ -198,15 +198,19 @@ P1.5 — Replace `print` with `logging`.
 - `indexer.py:1126, 1142, 1150, 1162` and any other stdout writes: switch to `log.info()` / `log.debug()`.
 - Configure logger at `main()` to write to `indexing_errors.log` (existing) and stderr.
 
-**Acceptance criteria:**
-- All existing tests pass.
-- New `test_selectors.py` covers all parameter/argument shapes listed.
-- New `test_crash_isolation.py` proves a single bad file does not abort the index.
-- `indexing_errors.log` contains warnings for any name collisions encountered when running the index against `test_fixtures/CalculatorApp`.
-- No `print` calls remain in `indexer.py` or `server.py`.
+**Acceptance criteria (✅ all met):**
+- [x] All existing tests pass. → 51 passed (was 28 baseline; +23 added in P1.2/P1.3/P1.4).
+- [x] New `test_selectors.py` covers all parameter/argument shapes listed. → 19 cases (12 declaration + 6 call-site + 1 collision regression).
+- [x] New `test_crash_isolation.py` proves a single bad file does not abort the index. → 2 tests covering binary garbage, empty file, UTF-8 BOM, 100K-char single line.
+- [x] `indexing_errors.log` contains warnings for any name collisions encountered when running the index against `test_fixtures/CalculatorApp`. → 4 name collisions (calculate, configure, perform, test) and 2 selector collisions logged.
+- [x] No `print` calls remain in `indexer.py` or `server.py`. → all 4 stdout writes routed through stderr + indexing_errors.log via the new logger.
 
-**Effort:** 2 days.
-**Dependencies:** Phase 0 must merge first (paths change).
+**Bonus regression coverage added (carried over from Sub-1A's review):**
+- `tests/test_mcp_tools.py::test_trace_dependencies_orientation_via_handler` — calls `server._trace_dependencies` directly to lock in P1.1's swap.
+- `tests/test_indexer_stdout.py` — subprocess assertion that the indexer never leaks to stdout.
+
+**Effort:** 2 days. → matched.
+**Dependencies:** Phase 0 must merge first (paths change). → satisfied.
 
 ---
 
