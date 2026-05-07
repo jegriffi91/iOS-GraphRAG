@@ -213,6 +213,54 @@ Independent of TLS, you can avoid the runtime download altogether by caching the
 > [!TIP]
 > No proxy workaround needed for `trace_dependencies` or `read_symbol` — only `semantic_search` uses the model. Skip the model download entirely if you don't need semantic search.
 
+### Offline / Pre-staged Model
+
+Some corporate networks block Hugging Face entirely, even with the corp CA bundle in place. In that case, stage the embedding model on a machine that has internet access, distribute the resulting directory through your usual internal channels, and point the indexer at the staged copy. The runtime never reaches out to `huggingface.co`.
+
+#### Stage the model
+
+On a machine with internet access:
+
+```bash
+uv run pip install huggingface_hub
+huggingface-cli download nomic-ai/nomic-embed-text-v1.5 \
+    --local-dir ~/.cache/ios-graphrag/models/nomic-embed-text-v1.5
+```
+
+The resulting directory contains `config.json`, `model.safetensors`, the tokenizer files, and `1_Pooling/`. Roughly 500 MB on disk.
+
+#### Distribute
+
+Ship the `nomic-embed-text-v1.5/` directory to teammates' `~/.cache/ios-graphrag/models/` via whatever your team already uses:
+
+- `rsync` / `scp` for one-off transfers between dev machines.
+- An internal artifact server (Artifactory, S3, internal package registry) for self-serve pull. <!-- TODO: org-specific Artifactory/S3 URL -->
+- A shared network drive that's already trusted by IT.
+
+#### Override the cache location
+
+If the cache directory is non-default — for example a shared `/opt/models/` mount, or the model lives next to your project under `./vendor/models/` — point the indexer at it explicitly:
+
+```bash
+export IOS_GRAPHRAG_MODEL_DIR=/opt/models/nomic-embed-text-v1.5
+```
+
+Resolution order at indexer startup:
+
+1. `$IOS_GRAPHRAG_MODEL_DIR` if set and populated with weight files.
+2. `~/.cache/ios-graphrag/models/nomic-embed-text-v1.5/` if populated.
+3. Hugging Face cache / network download (existing behavior).
+
+The indexer logs which path it loaded the model from (`model loaded from ...`) so you can confirm the override took effect.
+
+#### Verify
+
+```bash
+uv run ios-graphrag-preflight
+```
+
+Should report the model loaded successfully without any network access. If preflight reports the model as missing, double-check the directory contains both `config.json` and `model.safetensors` (or `pytorch_model.bin`).
+
 ### Quick Fixes
 
 | Problem | Fix |

@@ -90,8 +90,8 @@ def ensure_model() -> SentenceTransformer:
 @mcp.tool(
     name="swift_dependency_tracer",
     description=(
-        "ARCHITECTURE EXPLORER: Find usages, inheritance, protocols, and extensions via a pre-built GraphRAG. "
-        "NEVER USE grep or find to trace relationships. Bash is blind to cross-file ASTs, misses implicit bridging, and hallucinates connections. "
+        "Architecture explorer: find usages, inheritance, protocols, and extensions via a pre-built GraphRAG. "
+        "Prefer this over grep or find for tracing relationships. Bash is blind to cross-file ASTs, misses implicit bridging, and hallucinates connections. "
         "Returns structured JSON with: 'upstream' = symbols this file depends on (its parents/protocols/callees), "
         "'downstream' = symbols that depend on this file (its subclasses/conformers/callers), and 'extensions'."
     ),
@@ -160,9 +160,9 @@ def _trace_dependencies(
 @mcp.tool(
     name="objc_swift_bridge_finder",
     description=(
-        "CROSS-LANGUAGE MAPPER. Instantly finds all Swift classes inheriting from Objective-C (bridging headers). "
-        "DO NOT USE grep \"@objc\" or regex. Regular expressions cannot parse Swift syntax trees and will miss implicit inheritance chains. "
-        "Returns a complete, structured JSON graph instantly."
+        "Cross-language mapper. Finds all Swift classes inheriting from Objective-C (bridging headers). "
+        "Avoid using grep \"@objc\" or regex for this. Regular expressions cannot parse Swift syntax trees and will miss implicit inheritance chains. "
+        "Returns a complete, structured JSON graph."
     ),
 )
 def _find_bridging_header_usage() -> dict:
@@ -188,15 +188,15 @@ def _find_bridging_header_usage() -> dict:
 @mcp.tool(
     name="read_symbol_source",
     description=(
-        "SURGICAL CODE READER. Extracts LIVE source code blocks using precise byte-range offsets. "
-        "STRICTLY FORBIDDEN: DO NOT USE cat, head, tail, or read entire files. Reading full files instantly exhausts your context limit with irrelevant noise. "
+        "Surgical code reader. Extracts live source code blocks using precise byte-range offsets. "
+        "Do not use cat, head, tail, or read entire files for this. Reading full files exhausts your context limit with irrelevant noise. "
         "Extracts exactly the logic requested with zero waste."
     ),
 )
 def _read_symbol(
     file_path: Annotated[str, Field(description="Absolute file path from search or tracer results.")],
-    start_byte: Annotated[int, Field(description="Start byte offset from global_codebase_search results. DO NOT guess.", ge=0)],
-    end_byte: Annotated[int, Field(description="End byte offset from global_codebase_search results. DO NOT guess.", ge=0)],
+    start_byte: Annotated[int, Field(description="Start byte offset from global_codebase_search results. Do not guess.", ge=0)],
+    end_byte: Annotated[int, Field(description="End byte offset from global_codebase_search results. Do not guess.", ge=0)],
 ) -> dict:
     try:
         with open(file_path, "rb") as handle:
@@ -221,13 +221,13 @@ def _read_symbol(
 @mcp.tool(
     name="global_codebase_search",
     description=(
-        "PRIMARY SEARCH ENTRY POINT. Finds code by exact symbol OR conceptual meaning (e.g., 'auth flow'). "
-        "CRITICAL: DO NOT USE grep, ripgrep, or find. Bash text-matching is blind to graph structure, misses implicit links, and dumps massive unstructured noise that exhausts your context window. "
-        "CHAIN: global_codebase_search → swift_dependency_tracer → read_symbol_source."
+        "Primary search entry point. Finds code by exact symbol or conceptual meaning (e.g., 'auth flow'). "
+        "Note: prefer this over grep, ripgrep, or find. Bash text-matching is blind to graph structure, misses implicit links, and dumps unstructured noise that exhausts your context window. "
+        "Suggested chain: global_codebase_search → swift_dependency_tracer → read_symbol_source."
     ),
 )
 def _semantic_search(
-    query: Annotated[str, Field(description="Natural language concept or exact class/function name. DO NOT pass regex, glob patterns, or raw bash syntax.")],
+    query: Annotated[str, Field(description="Natural language concept or exact class/function name. Do not pass regex, glob patterns, or raw bash syntax.")],
     top_k: Annotated[int, Field(description="Number of results to return.", ge=1, le=50)] = 10,
 ) -> dict:
     if EMBEDDING_MATRIX is None or len(EMBEDDING_IDS) == 0:

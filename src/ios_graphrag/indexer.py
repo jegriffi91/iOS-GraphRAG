@@ -32,6 +32,70 @@ BATCH_SIZE = 256
 MAX_SYMLINK_DEPTH = 10
 LOG_PATH = "indexing_errors.log"
 
+# Default project-specific model cache. Distinct from the Hugging Face hub
+# cache (`~/.cache/huggingface/hub/models--nomic-ai--nomic-embed-text-v1.5/`)
+# which `doctor.py` inspects: that path follows the HF download convention,
+# while this one is the staging location populated by `huggingface-cli
+# download --local-dir ...` for offline distribution.
+DEFAULT_LOCAL_MODEL_DIR = (
+    Path.home() / ".cache" / "ios-graphrag" / "models" / "nomic-embed-text-v1.5"
+)
+
+
+def _has_model_weights(model_dir: Path) -> bool:
+    """Return True if ``model_dir`` looks like a sentence-transformers checkpoint.
+
+    Sentence-transformers needs ``config.json`` plus one of
+    ``model.safetensors`` / ``pytorch_model.bin``. We check for both pieces so
+    a partial directory (config without weights, or vice versa) is rejected
+    and we fall through to the next candidate in the chain.
+    """
+    if not model_dir.is_dir():
+        return False
+    if not (model_dir / "config.json").is_file():
+        return False
+    return (model_dir / "model.safetensors").is_file() or (
+        model_dir / "pytorch_model.bin"
+    ).is_file()
+
+
+def _resolve_model_path() -> str:
+    """Resolve the path/identifier passed to ``SentenceTransformer(...)``.
+
+    Resolution order:
+
+    1. ``$IOS_GRAPHRAG_MODEL_DIR`` if set and the directory contains the
+       expected weight files.
+    2. ``~/.cache/ios-graphrag/models/nomic-embed-text-v1.5/`` if it contains
+       the expected weight files.
+    3. Fall back to the Hugging Face identifier ``MODEL_NAME``, which means
+       ``sentence-transformers`` will use its existing HF hub cache or
+       download the model.
+    """
+    env_dir = os.environ.get("IOS_GRAPHRAG_MODEL_DIR")
+    if env_dir:
+        env_path = Path(env_dir).expanduser()
+        if _has_model_weights(env_path):
+            log.info(f"model loaded from IOS_GRAPHRAG_MODEL_DIR: {env_path}")
+            return str(env_path)
+        log.warning(
+            "IOS_GRAPHRAG_MODEL_DIR is set to %s but no model weights "
+            "(config.json + model.safetensors|pytorch_model.bin) were found; "
+            "falling back to default cache locations.",
+            env_path,
+        )
+
+    if _has_model_weights(DEFAULT_LOCAL_MODEL_DIR):
+        log.info(
+            f"model loaded from local cache: {DEFAULT_LOCAL_MODEL_DIR}"
+        )
+        return str(DEFAULT_LOCAL_MODEL_DIR)
+
+    log.info(
+        f"using HF identifier {MODEL_NAME!r} (HF hub cache or network download)"
+    )
+    return MODEL_NAME
+
 BLOCK_DIRS = {"Pods", "Carthage", "DerivedData", ".build", "vendor"}
 ALLOWED_EXTS = {".swift", ".h", ".m"}
 
@@ -734,31 +798,53 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     if not signatures:
         return []
 
+    # The spawned worker re-runs module import which calls basicConfig at
+    # WARNING. Bump the logger to INFO and add a stderr handler so the
+    # "model loaded from ..." line is visible in the parent's terminal —
+    # users rely on that to confirm an offline override actually took.
+    import sys as _sys
+
+    _worker_logger = logging.getLogger(__name__)
+    _worker_logger.setLevel(logging.INFO)
+    if not any(
+        isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is _sys.stderr
+        for h in _worker_logger.handlers
+    ):
+        _stderr = logging.StreamHandler(_sys.stderr)
+        _stderr.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        _worker_logger.addHandler(_stderr)
+
     _tls.configure_insecure_tls_if_requested()
 
-    # Use local model cache and offline mode to avoid network access
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    local_models_dir = os.path.join(script_dir, '..', 'models')
-    model_path = MODEL_NAME  # Default to HF model ID
-    
-    # Check for local snapshot and use it directly to avoid any network calls
-    if os.path.isdir(local_models_dir):
-        os.environ['HF_HOME'] = os.path.abspath(local_models_dir)
-        os.environ['HF_HUB_OFFLINE'] = '1'
-        os.environ['TRANSFORMERS_OFFLINE'] = '1'
-        
-        # Find the actual snapshot directory
-        snapshots_dir = os.path.join(local_models_dir, 'snapshots')
-        if os.path.isdir(snapshots_dir):
-            snapshots = os.listdir(snapshots_dir)
-            if snapshots:
-                # Use the first snapshot found (there's typically only one)
-                model_path = os.path.join(snapshots_dir, snapshots[0])
-    
+    # Resolve the model path/identifier with the documented precedence
+    # ($IOS_GRAPHRAG_MODEL_DIR → ~/.cache/ios-graphrag/models → HF id).
+    # This is consulted first so an env-var or per-user cache wins over the
+    # legacy in-repo `models/` snapshot below.
+    model_path = _resolve_model_path()
+
+    # Legacy fallback: if the resolver returned the HF identifier (i.e. no
+    # offline override matched) but an in-repo `models/` snapshot exists,
+    # prefer that snapshot. Preserves the prior behavior for users who
+    # staged the model under the package's own directory.
+    if model_path == MODEL_NAME:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        local_models_dir = os.path.join(script_dir, '..', 'models')
+        if os.path.isdir(local_models_dir):
+            os.environ['HF_HOME'] = os.path.abspath(local_models_dir)
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+
+            snapshots_dir = os.path.join(local_models_dir, 'snapshots')
+            if os.path.isdir(snapshots_dir):
+                snapshots = os.listdir(snapshots_dir)
+                if snapshots:
+                    model_path = os.path.join(snapshots_dir, snapshots[0])
+                    log.info(f"model loaded from in-repo snapshot: {model_path}")
+
     # Re-import to ensure clean state in worker
     from sentence_transformers import SentenceTransformer
     import torch
-    
+
     model = SentenceTransformer(model_path, trust_remote_code=True)
     try:
         device = "mps" if torch.backends.mps.is_available() else "cpu"
