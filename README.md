@@ -41,7 +41,7 @@ The engine is designed around a fundamental principle:
 ## Symbol Types
 
 The `nodes.symbol_type` column tags every indexed symbol. The current set
-(constrained by a CHECK in migration 004):
+(constrained by a CHECK in migration 005):
 
 - `class` — Swift `class` declarations
 - `struct` — Swift `struct` declarations
@@ -53,6 +53,11 @@ The `nodes.symbol_type` column tags every indexed symbol. The current set
 - `computed_property` — properties with a getter/setter block
 - `initializer` — `init` declarations (plain, failable, convenience, required)
 - `deinitializer` — `deinit` blocks
+- `enum_case` — Swift `case` declarations inside `enum` bodies (bare,
+  raw-valued, and associated-value forms; multi-case-per-line `case a, b, c`
+  produces one row per case). Cases with associated values get a call-site
+  selector like `custom(name:fn:)`; bare and raw-valued cases have NULL
+  selector.
 
 ### SwiftUI enrichment columns
 

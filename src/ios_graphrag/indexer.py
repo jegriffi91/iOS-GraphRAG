@@ -568,6 +568,125 @@ def is_computed_property(prop_node) -> bool:
     return any(child.type == "computed_property" for child in prop_node.children)
 
 
+def _extract_enum_case_param_labels(enum_type_parameters_node) -> List[str]:
+    """Extract argument labels from an ``enum_type_parameters`` node.
+
+    Unlike ``function_declaration`` whose parameters are wrapped in
+    ``parameter`` nodes, the Tree-sitter Swift grammar lays the children
+    of ``enum_type_parameters`` out FLAT, separated by ``,`` tokens::
+
+        enum_type_parameters
+          (
+          simple_identifier   <- label "name"
+          :
+          user_type
+          ,
+          simple_identifier   <- label "fn"
+          :
+          function_type
+          )
+
+    Unlabeled associated values omit the leading ``simple_identifier``
+    (the type starts directly after ``(`` or ``,``). A leading wildcard
+    (``case mixed(_ first: String)``) appears as a ``wildcard_pattern``
+    or ``simple_identifier`` whose text is ``"_"``.
+
+    Returns labels in source order, with ``"_"`` for unlabeled segments.
+    """
+    labels: List[str] = []
+    # Split children into per-comma segments (skipping the outer parens).
+    segments: List[List[Tuple[str, str]]] = []
+    current: List[Tuple[str, str]] = []
+    for child in enum_type_parameters_node.children:
+        if child.type in {"(", ")"}:
+            continue
+        if child.type == ",":
+            if current:
+                segments.append(current)
+            current = []
+            continue
+        text = child.text.decode("utf-8", errors="ignore")
+        current.append((child.type, text))
+    if current:
+        segments.append(current)
+
+    for segment in segments:
+        # Walk segment until we hit ":" — anything before is label/internal,
+        # anything after is type info we don't need for the selector.
+        label: Optional[str] = None
+        seen_identifier = False
+        for kind, text in segment:
+            if kind == ":":
+                break
+            if kind == "wildcard_pattern" or (kind == "simple_identifier" and text == "_"):
+                if not seen_identifier:
+                    label = "_"
+                    seen_identifier = True
+                continue
+            if kind == "simple_identifier":
+                if not seen_identifier:
+                    label = text
+                    seen_identifier = True
+        if label is None:
+            # No leading identifier in this segment -> the type is positional,
+            # which Swift renders as an unlabeled associated value.
+            labels.append("_")
+        else:
+            labels.append(label)
+    return labels
+
+
+def _extract_enum_case_names(enum_entry_node) -> List[Tuple[str, int, int]]:
+    """Return ``[(case_name, start_byte, end_byte)]`` for each case in an
+    ``enum_entry``.
+
+    The Tree-sitter Swift grammar represents
+    ``case red, green, blue`` as a single ``enum_entry`` node containing
+    multiple ``simple_identifier`` children separated by ``,``. We emit
+    one tuple per identifier so the caller can issue one row per case.
+
+    For cases with associated values
+    (``case custom(name: String, fn: ...)``) or raw values
+    (``case loading = "loading"``), only one ``simple_identifier`` directly
+    follows the ``case`` keyword (the rest of the children are
+    ``enum_type_parameters`` or the raw-value expression).
+    """
+    pairs: List[Tuple[str, int, int]] = []
+    seen_punct_or_param = False
+    for child in enum_entry_node.children:
+        # The case body shape is:
+        #   case <name>[(...)] [, <name>[(...)]] [= <expr>]
+        # If we hit enum_type_parameters or a raw-value '=', subsequent
+        # simple_identifiers are NOT case names.
+        if child.type in {"enum_type_parameters", "="}:
+            seen_punct_or_param = True
+            continue
+        if child.type == "simple_identifier" and not seen_punct_or_param:
+            text = child.text.decode("utf-8", errors="ignore")
+            pairs.append((text, child.start_byte, child.end_byte))
+        # Note: a `,` separator does NOT flip seen_punct_or_param, because
+        # `case red, green, blue` continues to enumerate names.
+    return pairs
+
+
+def _extract_enum_case_selector(enum_entry_node, case_name: str) -> Optional[str]:
+    """Build a Swift call-site selector for a case with associated values.
+
+    Returns ``"custom(name:fn:)"`` for ``case custom(name: String, fn: ...)``,
+    ``"unlabeled(_:)"`` for ``case unlabeled(String)``, or ``None`` if the
+    case has no associated values (the caller leaves selector NULL on
+    those rows).
+    """
+    for child in enum_entry_node.children:
+        if child.type != "enum_type_parameters":
+            continue
+        labels = _extract_enum_case_param_labels(child)
+        if not labels:
+            return f"{case_name}()"
+        return f"{case_name}({''.join(label + ':' for label in labels)})"
+    return None
+
+
 def _attribute_names(node) -> List[str]:
     """Return the type-identifier names of every ``@Foo(...)`` attribute on ``node``.
 
@@ -851,9 +970,13 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         is_observable=is_observable,
                     )
                 )
-            # Still recurse to find nested types
+            # Still recurse to find nested types and (for enums) enum cases.
+            # The grammar uses ``enum_class_body`` for enums and
+            # ``class_body`` for class/struct/protocol/extension/actor; both
+            # may contain nested types or member declarations the walker
+            # needs to descend into.
             for child in node.children:
-                if child.type == "class_body":
+                if child.type in {"class_body", "enum_class_body"}:
                     for inner in child.children:
                         walk_node(inner)
             return
@@ -1049,6 +1172,44 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     calls=[],
                 )
             )
+            return
+
+        # Handle enum_entry (Phase 5 P1). One ``enum_entry`` node may declare
+        # multiple cases on a single line (``case red, green, blue``); we
+        # emit one Symbol per case name. For cases with associated values
+        # we build a call-site selector via _extract_enum_case_selector
+        # (e.g. ``custom(name:fn:)``); raw-value enums (``case idle =
+        # "idle"``) and bare cases get selector=NULL because they have no
+        # invocation form. The line_number tracks the case identifier's
+        # actual start so multi-case-per-line entries differ even when
+        # they share the same enum_entry start.
+        if node_type == "enum_entry":
+            entry_signature = extract_signature_line(code_bytes, node.start_byte)
+            for case_name, case_start, case_end in _extract_enum_case_names(node):
+                line_number = node.start_point[0] + 1
+                # If the entry has associated values, we keep the selector;
+                # otherwise selector stays NULL (matches Phase 5 P0 deinit).
+                # Multi-case-per-line shares the same enum_type_parameters,
+                # but Swift forbids associated values on multi-case lines,
+                # so this is unambiguous in practice.
+                selector = _extract_enum_case_selector(node, case_name)
+                symbols.append(
+                    Symbol(
+                        file_path="",
+                        symbol_name=case_name,
+                        symbol_type="enum_case",
+                        language="swift",
+                        start_byte=case_start,
+                        end_byte=case_end,
+                        line_number=line_number,
+                        signature=entry_signature,
+                        inherits=[],
+                        conforms=[],
+                        extends=None,
+                        calls=[],
+                        selector=selector,
+                    )
+                )
             return
 
         # Recurse into children
