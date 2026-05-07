@@ -1,5 +1,5 @@
+import argparse
 import os
-import ssl
 import sys
 import sqlite3
 import logging
@@ -9,19 +9,12 @@ from typing import Annotated, Dict, List
 
 from pydantic import Field
 
-# Bypass SSL verification for enterprise proxies
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
-os.environ['CURL_CA_BUNDLE'] = ''
-
 import networkx as nx
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 from sentence_transformers import SentenceTransformer
+
+from . import _tls
 
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
@@ -263,6 +256,32 @@ def _semantic_search(
 
 
 def main() -> None:
+    # Argparse is intentionally minimal: the server's primary contract is
+    # "spawned with no args by an MCP client". --cert-bundle is the only
+    # flag and is optional, so the no-args invocation behavior is preserved.
+    parser = argparse.ArgumentParser(
+        prog="ios-graphrag-server",
+        description="iOS-GraphRAG MCP stdio server",
+    )
+    parser.add_argument(
+        "--cert-bundle",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a corporate CA bundle (PEM). Sets REQUESTS_CA_BUNDLE and "
+            "SSL_CERT_FILE for the duration of this process; TLS verification "
+            "stays ON. Recommended over GRAPHRAG_INSECURE_TLS=1."
+        ),
+    )
+    args = parser.parse_args()
+
+    # Order matters: logging is configured at module import (see basicConfig
+    # above), so the WARNING from configure_insecure_tls_if_requested() is
+    # captured by handlers that already exist.
+    _tls.configure_insecure_tls_if_requested()
+    if args.cert_bundle:
+        _tls.configure_cert_bundle(args.cert_bundle)
+
     try:
         db_path = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
         log.info(f"Starting iOS-GraphRAG MCP server")

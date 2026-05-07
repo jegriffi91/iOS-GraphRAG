@@ -8,16 +8,12 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
-import ssl
 
-try: 
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
-os.environ['CURL_CA_BUNDLE'] = ''
-os.environ['HF_HUB_DISABLE_HTTPX'] = '1'
+# Force the `requests`-based HF Hub client (vs httpx). Orthogonal to TLS
+# verification — kept here because it predates the Phase 2 audit and removing
+# it could regress download paths in environments that disable httpx for
+# unrelated reasons. Move to _tls.py only if it ever needs to be opt-in.
+os.environ.setdefault('HF_HUB_DISABLE_HTTPX', '1')
 
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -27,6 +23,8 @@ from sentence_transformers import SentenceTransformer
 from tree_sitter import Language, Parser
 import tree_sitter_objc
 import tree_sitter_swift
+
+from . import _tls
 
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
@@ -723,30 +721,21 @@ def chunked(iterable: List[str], size: int) -> Iterable[List[str]]:
 
 def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     """Worker function to generate embeddings in a separate process.
-    
+
     This is isolated to ensure a fresh httpx/huggingface_hub client state,
     avoiding 'client has been closed' errors.
+
+    The worker re-applies the GRAPHRAG_INSECURE_TLS opt-in so that bypass
+    propagates into the spawned interpreter. Env vars set in the parent are
+    inherited by ``multiprocessing.spawn`` children, so simply re-running the
+    same gating logic gives the worker the same TLS posture as its parent
+    without ever bypassing TLS unconditionally.
     """
     if not signatures:
         return []
-    
-    # Set up SSL bypass for corporate proxy environments
-    import ssl
-    import os
-    try:
-        _create_unverified_https_context = ssl._create_unverified_context
-    except AttributeError:
-        pass
-    else:
-        ssl._create_default_https_context = _create_unverified_https_context
-    
-    # HuggingFace/httpx specific SSL bypass
-    os.environ['HF_HUB_DISABLE_SSL_VERIFY'] = '1'
-    os.environ['CURL_CA_BUNDLE'] = ''
-    os.environ['REQUESTS_CA_BUNDLE'] = ''
-    os.environ['SSL_CERT_FILE'] = ''
-    os.environ['HTTPX_SSL_VERIFY'] = '0'
-    
+
+    _tls.configure_insecure_tls_if_requested()
+
     # Use local model cache and offline mode to avoid network access
     script_dir = os.path.dirname(os.path.abspath(__file__))
     local_models_dir = os.path.join(script_dir, '..', 'models')
@@ -1361,6 +1350,16 @@ def main() -> None:
     parser.add_argument("--repo", required=True, help="Repository root path")
     parser.add_argument("--db", default=DB_DEFAULT, help="SQLite database path")
     parser.add_argument("--full", action="store_true", help="Force full re-index")
+    parser.add_argument(
+        "--cert-bundle",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a corporate CA bundle (PEM). Sets REQUESTS_CA_BUNDLE and "
+            "SSL_CERT_FILE for the duration of this process; TLS verification "
+            "stays ON. Recommended over GRAPHRAG_INSECURE_TLS=1."
+        ),
+    )
     args = parser.parse_args()
 
     # Reconfigure logging for CLI usage:
@@ -1397,6 +1396,12 @@ def main() -> None:
     file_handler.setFormatter(fmt)
     file_handler.setLevel(level)
     root.addHandler(file_handler)
+
+    # TLS configuration must come AFTER logging is wired so the WARNING emitted
+    # by configure_insecure_tls_if_requested() actually reaches stderr/log file.
+    _tls.configure_insecure_tls_if_requested()
+    if args.cert_bundle:
+        _tls.configure_cert_bundle(args.cert_bundle)
 
     index_repository(args.repo, args.db, args.full)
 

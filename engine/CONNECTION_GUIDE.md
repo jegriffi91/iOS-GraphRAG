@@ -135,7 +135,63 @@ cat /path/to/your/knowledge-graph-directory/server.log
 
 ### Enterprise SSL (Corporate Proxy)
 
-`sentence_transformers` needs to download a model. If your corporate proxy blocks it:
+`sentence_transformers` needs to download an embedding model from Hugging Face. If your corporate proxy intercepts TLS with a self-signed certificate, the download fails with `certificate verify failed`.
+
+#### Recommended: point at your corporate CA bundle
+
+Ask your security team for the path to the corporate CA bundle (a PEM file). Both the indexer and the server accept it directly:
+
+```bash
+# CLI flag — preferred for one-off runs
+ios-graphrag-index --repo /path/to/repo --cert-bundle /path/to/corp-bundle.pem
+
+# Same flag on the server (typically set in your MCP client config)
+ios-graphrag-server --cert-bundle /path/to/corp-bundle.pem
+```
+
+Or set it once for the shell:
+
+```bash
+export REQUESTS_CA_BUNDLE=/path/to/corp-bundle.pem
+export SSL_CERT_FILE=/path/to/corp-bundle.pem
+```
+
+In your client config (Copilot CLI / VS Code / Claude Desktop), pass the flag through `args` and/or set the env vars. Example for Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "iOS-GraphRAG": {
+      "command": "/Users/YOUR_USER/tools/iOS-GraphRAG/.venv/bin/ios-graphrag-server",
+      "args": ["--cert-bundle", "/Users/YOUR_USER/security/corp-bundle.pem"],
+      "env": {
+        "GRAPH_DB_PATH": "/Users/YOUR_USER/tools/iOS-GraphRAG/knowledge-graph.sqlite"
+      }
+    }
+  }
+}
+```
+
+TLS verification stays **on** — the cert is verified against your corporate CA. This is what passes infosec review.
+
+#### Last resort: disable TLS verification entirely
+
+If your environment has no available corporate CA bundle and the security team explicitly approves an interim bypass, set the opt-in env var:
+
+```bash
+export GRAPHRAG_INSECURE_TLS=1
+```
+
+> [!CAUTION]
+> **Get security team sign-off before using this.** It bypasses TLS verification across all outbound HTTPS calls (including Hugging Face model downloads), which means a man-in-the-middle attacker on your network could swap in malicious model weights. Prefer the cert-bundle approach above.
+
+When this env var is set, the indexer/server log a `WARNING: TLS verification disabled by GRAPHRAG_INSECURE_TLS=1; ...` line on startup so the bypass is visible in audit logs.
+
+The change to make this behavior opt-in landed in Phase 2 of the production hardening roadmap (see `docs/PRODUCTION_ROADMAP.md` §3 → Phase 2). Pre-Phase-2 builds bypassed TLS unconditionally at module import; if you're upgrading from one of those, your existing flows still work but you may now hit `certificate verify failed` until you set `--cert-bundle` or `GRAPHRAG_INSECURE_TLS=1`.
+
+#### Pre-cache the model offline
+
+Independent of TLS, you can avoid the runtime download altogether by caching the model on a machine with internet access and copying the cache:
 
 1. **On a home machine** (no proxy), cache the model:
    ```bash
