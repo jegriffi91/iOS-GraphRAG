@@ -1,0 +1,221 @@
+{
+  "files": [
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Package.swift",
+      "size_bytes": 289,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 107
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/Calculator.swift",
+      "size_bytes": 939,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 312
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/Engine.swift",
+      "size_bytes": 1412,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 332
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/EnumAndChains.swift",
+      "size_bytes": 927,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 219
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/OperationFactory.swift",
+      "size_bytes": 956,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 224
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/Operation.swift",
+      "size_bytes": 1248,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 346
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/OverloadCases.swift",
+      "size_bytes": 2305,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 418
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/PropertiesAndInit.swift",
+      "size_bytes": 1683,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 393
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/ScientificCalculator.swift",
+      "size_bytes": 1172,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 332
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/SubscriptsAndAliases.swift",
+      "size_bytes": 698,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 211
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/StateMachine.swift",
+      "size_bytes": 2078,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 429
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".h",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/ObjCBridge/CalculatorMath.h",
+      "size_bytes": 502,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 162
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".swift",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/CalculatorApp/SwiftUIPatterns.swift",
+      "size_bytes": 2238,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 480
+    },
+    {
+      "error_node_count": 0,
+      "extension": ".m",
+      "has_error": false,
+      "missing_node_count": 0,
+      "path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp/Sources/ObjCBridge/CalculatorMath.m",
+      "size_bytes": 509,
+      "skipped_reason": null,
+      "timeout": false,
+      "total_nodes": 196
+    }
+  ],
+  "metadata": {
+    "extensions_audited": [
+      ".swift",
+      ".h",
+      ".m"
+    ],
+    "git_sha": "83cb6cf",
+    "platform": {
+      "machine": "arm64",
+      "release": "25.3.0",
+      "system": "Darwin"
+    },
+    "python_version": "3.14.3",
+    "repo_path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp",
+    "skip_dirs": [
+      ".build",
+      ".git",
+      "Carthage",
+      "DerivedData",
+      "Pods",
+      "node_modules",
+      "vendor"
+    ],
+    "timestamp": "2026-05-07T21:06:50Z",
+    "tree_sitter_objc_version": "3.0.2",
+    "tree_sitter_swift_version": "0.7.2",
+    "tree_sitter_version": "0.25.2"
+  },
+  "summary": {
+    "by_extension": {
+      ".h": {
+        "files_with_error": 0,
+        "percent": 0.0,
+        "total": 1
+      },
+      ".m": {
+        "files_with_error": 0,
+        "percent": 0.0,
+        "total": 1
+      },
+      ".swift": {
+        "files_with_error": 0,
+        "percent": 0.0,
+        "total": 12
+      }
+    },
+    "decision_recommendation": "Strategy A (tree-sitter primary, hardened fallback)",
+    "files_with_any_error_node": 0,
+    "files_with_any_error_node_percent": 0.0,
+    "files_with_has_error": 0,
+    "files_with_has_error_percent": 0.0,
+    "histogram_error_node_counts": {
+      "0": 14,
+      "1-5": 0,
+      "100+": 0,
+      "21-100": 0,
+      "6-20": 0
+    },
+    "skipped": 0,
+    "timeouts": 0,
+    "total_files": 14
+  },
+  "top_files": []
+}

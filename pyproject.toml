@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ios-graph-rag"
+version = "0.2.0"
+description = "High-Performance Static Artifact GraphRAG for iOS"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.27,<1.28",
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-swift>=0.7,<0.8",
+    "tree-sitter-objc>=3.0,<3.1",
+    "networkx>=3.6,<3.7",
+    "numpy>=2.4,<2.5",
+    "sentence-transformers>=5.4,<5.5",
+    "tqdm>=4.67,<4.68",
+    "einops>=0.8,<0.9",
+    "torch>=2.11,<2.12",
+    "watchdog>=4.0,<5.0",
+]
+
+[project.scripts]
+ios-graphrag-index = "ios_graphrag.indexer:main"
+ios-graphrag-server = "ios_graphrag.server:main"
+ios-graphrag-preflight = "ios_graphrag.preflight:main"
+ios-graphrag-doctor = "ios_graphrag.doctor:main"
+ios-graphrag-watch = "ios_graphrag.watcher:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.13,<0.16",
+]
+
+# Permissive baseline so CI doesn't block on cosmetic issues that the
+# existing codebase emits today. The intent is to catch real bugs
+# (unused imports, undefined names, simple style) without burning a
+# whole phase on cleanup. Future phases can add F8 / B (bugbear) /
+# UP (pyupgrade) as the codebase tightens.
+#
+# - line-length 100 matches what most lines aim for; long-line policing
+#   is delegated to the formatter via E501 ignore (see [tool.ruff.lint]).
+# - target-version py311 matches `requires-python = ">=3.11"` above.
+# - extend-exclude trims directories we don't want to lint:
+#     .venv             — third-party code.
+#     test_fixtures     — Swift sources, not Python.
+#     engine/           — pre-Phase-0 legacy paths still on disk.
+#     benchmarks/results — generated JSON; nothing to lint.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "test_fixtures",
+    "engine",
+    "benchmarks/results",
+]
+
+[tool.ruff.lint]
+# Smallest reasonable rule set so the codebase passes today.
+# E (pycodestyle errors), F (pyflakes), I (isort).
+select = [
+    "E",
+    "F",
+    "I",
+]
+# E501 is enforced by `ruff format`, not the linter — they disagree on
+# how to break long strings, and we prefer the formatter's verdict.
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests sometimes import after fixture setup (env vars, sys.path tweaks).
+"tests/**" = ["E402"]

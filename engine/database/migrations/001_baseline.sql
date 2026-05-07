@@ -1,5 +1,10 @@
--- Production Schema for iOS-GraphRAG (Enterprise Edition)
--- This schema MUST match the columns used by indexer.py
+-- 001_baseline.sql -- initial schema for iOS-GraphRAG.
+--
+-- For a fresh DB (no existing tables), this creates everything.
+-- For a legacy DB (existing tables, no schema_version row), the migration
+-- runner detects existing tables and stamps schema_version directly to 1
+-- without re-running the DDL -- the CREATE TABLE IF NOT EXISTS guards make
+-- the DDL itself a no-op against legacy DBs that already have the tables.
 
 CREATE TABLE IF NOT EXISTS file_hashes (
     path TEXT PRIMARY KEY,
@@ -10,21 +15,21 @@ CREATE TABLE IF NOT EXISTS nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT NOT NULL,
     symbol_name TEXT NOT NULL,
-    symbol_type TEXT NOT NULL,          -- "class", "struct", "protocol", "extension", "function", "enum"
-    language TEXT NOT NULL,              -- "swift" | "objc"
+    symbol_type TEXT NOT NULL,
+    language TEXT NOT NULL,
     start_byte INTEGER NOT NULL,
     end_byte INTEGER NOT NULL,
     line_number INTEGER,
     signature TEXT NOT NULL,
-    selector TEXT                        -- Swift selector: "funcName(_:label:)" for overload disambiguation
+    selector TEXT
 );
 
 CREATE TABLE IF NOT EXISTS edges (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_node_id INTEGER NOT NULL,
-    target_node_id INTEGER,             -- Can be NULL if unresolved
-    target_symbol TEXT NOT NULL,        -- The name of the target symbol
-    edge_type TEXT NOT NULL,            -- "INHERITS", "CONFORMS", "EXTENDS", "CALLS", "IMPORTS", "BRIDGING"
+    target_node_id INTEGER,
+    target_symbol TEXT NOT NULL,
+    edge_type TEXT NOT NULL,
     line_number INTEGER,
     FOREIGN KEY (source_node_id) REFERENCES nodes(id),
     FOREIGN KEY (target_node_id) REFERENCES nodes(id)
@@ -39,11 +44,10 @@ CREATE TABLE IF NOT EXISTS extension_map (
 
 CREATE TABLE IF NOT EXISTS node_embeddings (
     node_id INTEGER PRIMARY KEY,
-    embedding BLOB NOT NULL,            -- Serialized fp32 numpy array
+    embedding BLOB NOT NULL,
     FOREIGN KEY (node_id) REFERENCES nodes(id)
 );
 
--- Indexes for fast lookups
 CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol_name ON nodes(symbol_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol_type ON nodes(symbol_type);
@@ -52,11 +56,9 @@ CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_node_id);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_node_id);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type);
 
--- Schema versioning (Phase 6a). The migration runner in
--- src/ios_graphrag/_migrations.py reads MAX(version) from this table and
--- applies any unapplied migrations from engine/database/migrations/ in
--- numeric order. Absence of this table is treated as version 0.
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+INSERT OR REPLACE INTO schema_version (version) VALUES (1);

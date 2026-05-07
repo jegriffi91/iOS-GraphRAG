@@ -1,0 +1,63 @@
+# Nightly benchmark for iOS-GraphRAG.
+#
+# Runs benchmarks/run.py and tools/parse_audit.py on the checked-in
+# CalculatorApp test fixture, compares the fresh outputs against the
+# committed baseline at benchmarks/baseline/, and uploads both fresh
+# JSONs as build artifacts (90-day retention).
+# Schedule: 11:00 UTC daily (~04:00 US Pacific, late-evening for EU teams).
+#
+# Baseline rationale and tolerances live in benchmarks/baseline/README.md
+# and benchmarks/check_regression.py docstrings respectively. tl;dr: the
+# fixture is too small for absolute numbers to mean much, but RATIOS
+# against the baseline catch egregious pipeline-level regressions.
+name: Nightly Benchmark
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 11:00 UTC daily
+  workflow_dispatch: {}    # allow manual trigger from the Actions tab
+
+jobs:
+  benchmark:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install deps
+        run: uv sync --all-extras --dev
+
+      - name: Run benchmark
+        run: |
+          uv run python benchmarks/run.py \
+            --repo test_fixtures/CalculatorApp \
+            --output benchmarks/results/
+
+      - name: Run parse audit
+        run: |
+          uv run python tools/parse_audit.py \
+            --repo test_fixtures/CalculatorApp \
+            --output benchmarks/results/
+
+      - name: Regression check (vs committed baseline)
+        run: |
+          BENCH_CURRENT=$(ls -t benchmarks/results/*-*.json | grep -v parse-audit | head -1)
+          AUDIT_CURRENT=$(ls -t benchmarks/results/parse-audit-*.json | head -1)
+          uv run python benchmarks/check_regression.py \
+            --benchmark-baseline benchmarks/baseline/full_index.json \
+            --benchmark-current "$BENCH_CURRENT" \
+            --audit-baseline benchmarks/baseline/parse_audit.json \
+            --audit-current "$AUDIT_CURRENT"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.sha }}-${{ github.run_id }}
+          path: benchmarks/results/*.json
+          retention-days: 90

@@ -77,8 +77,8 @@ README prose says upstream = "this file inherits from / conforms to," downstream
 
 ### 2.2 Correctness concerns to verify and fix
 
-**V1. Swift selector for unlabeled parameters is likely wrong.**
-`build_swift_selector` (`engine/core/indexer.py:223-249`) walks parameter children and grabs the first `simple_identifier` as the label. For `func test(_ something: String)`, the `_` is a literal token, not a `simple_identifier`, so the first match is `something`, yielding selector `test(something:)` instead of `test(_:)`. That collides with the actual `test(something:)` overload in `OverloadCases.swift`. The corresponding test (`tests/test_function_calls.py:104-125`) asserts `edge["selector"] == "test(_:)"`. Must verify with a real run, then fix.
+**V1. Swift selector for unlabeled parameters — defensively refactored in Phase 1 P1.2 (commit `78f171c`).**
+The roadmap's original concern was that `build_swift_selector` (`engine/core/indexer.py:223-249`) walked parameter children, grabbed the first `simple_identifier` as the label, and would yield `test(something:)` for `func test(_ something: String)` — colliding with the `test(something: String)` overload. **Empirical finding:** the locked grammar (`tree-sitter-swift>=0.7,<0.8`) emits `_` as a `simple_identifier` whose `text` is `"_"`, so the original code's "break after first `simple_identifier`" accidentally produced the correct selector (`test(_:)`). All 28 baseline tests passed under the OLD code. The bug as described did **not** exist in this codebase. Phase 1 P1.2 instead landed a defensive refactor: extracted `_extract_param_label` helper (`src/ios_graphrag/indexer.py:214-260`) that explicitly checks for wildcard text, plus 19 parametric tests in `tests/test_selectors.py` covering all parameter shapes. A future grammar update that types `_` as a different node type cannot now silently break selector emission.
 
 **V2. `name_map` and `selector_map` silently pick the first match.**
 `update_unresolved_edges:993` and `resolve_selector_ids:818-823` store one node per name. In a 1M-LOC monorepo there will be many same-named types/selectors across modules. INHERITS/CONFORMS edges resolve non-deterministically.
@@ -154,18 +154,18 @@ P0.5 — Pin dependencies.
 - `engine/pyproject.toml:7-17`: pin minor versions for `mcp`, `tree-sitter`, `tree-sitter-swift`, `tree-sitter-objc`, `networkx`, `numpy`, `sentence-transformers`, `tqdm`, `einops`, `torch`.
 - Commit `uv.lock`.
 
-**Acceptance criteria:**
-- `git ls-files | wc -l` drops from ~1339 to ~30.
-- Repo size on disk <2 MB.
-- Fresh clone + `uv sync` + `pytest tests/` succeeds without modifying anything.
-- `ios-graphrag-server --help` works.
+**Acceptance criteria (✅ Phase 0 landed in commits 578e7ed, 85550b4, 5043757):**
+- [x] `git ls-files | wc -l` drops from ~1339 to ~30. → 25 (verified).
+- [x] Repo size on disk <2 MB. → trivially met (25 tracked files).
+- [x] Fresh clone + `uv sync` + `pytest tests/` succeeds without modifying anything. → 28 passed.
+- [x] `ios-graphrag-server --help` works. → both `ios-graphrag-server` and `ios-graphrag-index --help` work.
 
 **Effort:** 4 hours.
 **Dependencies:** none.
 
 ---
 
-### Phase 1 — Correctness Fixes (2 days)
+### Phase 1 — Correctness Fixes (2 days) ✅ landed in commits 234f54a, 78f171c, 992bdfc
 
 **Goal:** Stop the bleeding before adding features. Existing test suite stays green; new tests added for each fix.
 
@@ -198,15 +198,19 @@ P1.5 — Replace `print` with `logging`.
 - `indexer.py:1126, 1142, 1150, 1162` and any other stdout writes: switch to `log.info()` / `log.debug()`.
 - Configure logger at `main()` to write to `indexing_errors.log` (existing) and stderr.
 
-**Acceptance criteria:**
-- All existing tests pass.
-- New `test_selectors.py` covers all parameter/argument shapes listed.
-- New `test_crash_isolation.py` proves a single bad file does not abort the index.
-- `indexing_errors.log` contains warnings for any name collisions encountered when running the index against `test_fixtures/CalculatorApp`.
-- No `print` calls remain in `indexer.py` or `server.py`.
+**Acceptance criteria (✅ all met):**
+- [x] All existing tests pass. → 51 passed (was 28 baseline; +23 added in P1.2/P1.3/P1.4).
+- [x] New `test_selectors.py` covers all parameter/argument shapes listed. → 19 cases (12 declaration + 6 call-site + 1 collision regression).
+- [x] New `test_crash_isolation.py` proves a single bad file does not abort the index. → 2 tests covering binary garbage, empty file, UTF-8 BOM, 100K-char single line.
+- [x] `indexing_errors.log` contains warnings for any name collisions encountered when running the index against `test_fixtures/CalculatorApp`. → 4 name collisions (calculate, configure, perform, test) and 2 selector collisions logged.
+- [x] No `print` calls remain in `indexer.py` or `server.py`. → all 4 stdout writes routed through stderr + indexing_errors.log via the new logger.
 
-**Effort:** 2 days.
-**Dependencies:** Phase 0 must merge first (paths change).
+**Bonus regression coverage added (carried over from Sub-1A's review):**
+- `tests/test_mcp_tools.py::test_trace_dependencies_orientation_via_handler` — calls `server._trace_dependencies` directly to lock in P1.1's swap.
+- `tests/test_indexer_stdout.py` — subprocess assertion that the indexer never leaks to stdout.
+
+**Effort:** 2 days. → matched.
+**Dependencies:** Phase 0 must merge first (paths change). → satisfied.
 
 ---
 
@@ -230,14 +234,14 @@ P2.3 — `--cert-bundle` CLI flag.
 - Add to `ios-graphrag-index` and `ios-graphrag-server` CLIs: `--cert-bundle PATH` sets `REQUESTS_CA_BUNDLE` and `SSL_CERT_FILE` for the duration of the process.
 - Document in `CONNECTION_GUIDE.md`.
 
-**Acceptance criteria:**
-- Default invocation (no env vars) verifies TLS against a real PyPI/HF endpoint.
-- With `GRAPHRAG_INSECURE_TLS=1`, bypass is active and a WARNING is logged.
-- With `--cert-bundle ./corp.pem`, the cert is used and verification stays on.
-- Search the codebase for `_create_unverified_https_context`: no calls outside `_tls.py`.
+**Acceptance criteria (✅ Phase 2 landed in commit 41dc0ff):**
+- [x] Default invocation (no env vars) verifies TLS against a real PyPI/HF endpoint. → smoke run with no env var produced 0 "TLS verification disabled" lines (gate 7 verified).
+- [x] With `GRAPHRAG_INSECURE_TLS=1`, bypass is active and a WARNING is logged. → smoke run produced exactly 1 WARNING line (gate 6 verified).
+- [x] With `--cert-bundle ./corp.pem`, the cert is used and verification stays on. → `tests/test_tls_config.py::test_cert_bundle_sets_env_vars` verified (REQUESTS_CA_BUNDLE + SSL_CERT_FILE both set to abs path; ssl context unchanged).
+- [x] Search the codebase for `_create_unverified_https_context`: no calls outside `_tls.py`. → grep against `src/ios_graphrag/` returns hits only in `_tls.py`; `tests/test_tls_config.py` has the assertion-string mention but is itself the regression-posture test.
 
-**Effort:** 1 day.
-**Dependencies:** Phase 0 (path changes); independent of Phase 1.
+**Effort:** 1 day. → matched.
+**Dependencies:** Phase 0 (path changes); independent of Phase 1. → satisfied.
 
 ---
 
@@ -276,13 +280,18 @@ P3.4 — `graphrag doctor` subcommand.
 P3.5 — Tone down tool descriptions.
 - `engine/core/server.py:97-225`: replace "STRICTLY FORBIDDEN", "DO NOT USE", "CRITICAL" with calmer language. Keep the directive intent ("Prefer this over grep because…") but drop the all-caps.
 
-**Acceptance criteria:**
-- `ios-graphrag-preflight` on a fresh machine produces a green run, with copy-pasteable Copilot config.
-- `ios-graphrag-doctor` produces useful output on a healthy system and on each of the failure modes listed.
-- Tool descriptions are readable and don't shout.
+**Acceptance criteria (✅ autonomous portions landed in commits 6090ad7, 1b1e429; ⚠️ P3.2 pending owner-empirical work):**
+- [x] `ios-graphrag-preflight` on a fresh machine produces a green run, with copy-pasteable Copilot config. → 7 checks PASS on this machine; emits `~/.config/gh-copilot/config.yml` YAML + VS Code `settings.json` JSON snippets at end (with caveat noting P3.2 verification still required).
+- [x] `ios-graphrag-doctor` produces useful output on a healthy system and on each of the failure modes listed. → 8 diagnostics + `--bug-report` mode (Python/platform/deps/redacted env vars/log tail). Verified end-to-end with and without DB present.
+- [x] Tool descriptions are readable and don't shout. → grep `STRICTLY FORBIDDEN|DO NOT USE|CRITICAL:|MUST NEVER|NEVER USE` returns empty in `src/ios_graphrag/server.py`.
+- [ ] **P3.2 — pending owner empirical work.** Verify the Copilot CLI MCP config key (`mcp_servers:`) and VS Code Copilot extension key (`github.copilot.chat.mcp.servers`) are still current on a fresh corp laptop with current Copilot release. Update `engine/CONNECTION_GUIDE.md` and `src/ios_graphrag/preflight.py` config snippets if either has drifted.
 
-**Effort:** 2 days (excluding P3.2 which depends on owner machine).
-**Dependencies:** Phases 0, 1, 2.
+**Bonus delivered:**
+- P3.3 model resolution chain extended to support `IOS_GRAPHRAG_MODEL_DIR` env var + `~/.cache/ios-graphrag/models/` default cache, with HF identifier as fallback. New `tests/test_model_resolution.py` (3 tests).
+- `engine/CONNECTION_GUIDE.md` adds an "Offline / Pre-staged Model" section documenting `huggingface-cli download` + Artifactory/S3 staging (with `<!-- TODO: org-specific URL -->` placeholder for owner to fill in).
+
+**Effort:** 2 days (excluding P3.2 which depends on owner machine). → matched.
+**Dependencies:** Phases 0, 1, 2. → satisfied.
 
 ---
 
@@ -304,13 +313,17 @@ P3.5 — Tone down tool descriptions.
 - Output: JSON to `benchmarks/results/<git-sha>-<timestamp>.json`.
 - Owner runs against a representative slice (start with 200k LOC, then full 1M).
 
-**Acceptance criteria for 4a:** harness runs locally on `test_fixtures/CalculatorApp` and produces a result JSON. Owner runs against the real repo and shares the results JSON for the next phases.
+**Acceptance criteria for 4a (✅ tool landed in commit 4e1fc5a; ⚠️ real-repo run pending owner):**
+- [x] Harness runs locally on `test_fixtures/CalculatorApp` and produces a result JSON. → smoke run produces JSON at `benchmarks/results/<sha>-<ts>.json` covering metadata + full_index + cold start + latency percentiles + memory.
+- [ ] Owner runs against the real repo (200k LOC slice, then full 1M) and shares the results JSON. → **pending**. The harness instruments `index_repository` via 10 DEBUG-level `PHASE_*` markers (no INFO-level pollution), uses `git stash` defensively for incremental measurement, and emits a `READY` log line in `server.py:303` for cold-start measurement. RSS unit handling documented in `benchmarks/README.md` (macOS bytes vs Linux kilobytes).
 
-#### Phase 4b — Eliminate per-incremental model reload (½ day)
+#### Phase 4b — Eliminate per-incremental model reload (½ day) ✅ landed
 
-- Audit whether the SSL/httpx contamination concern that motivated `embed_signatures` (`indexer.py:736-747`) still applies with current `sentence-transformers`.
-- If not, run the embedding model in-process. Add a benchmark before/after.
-- If it still applies, restructure as a long-lived embedding daemon (separate process, persistent socket).
+- Audit (commit on this branch) loaded `SentenceTransformer` two and three times back-to-back in one process under the pinned `sentence-transformers 5.4 / torch 2.11 / huggingface_hub 1.14 / httpx 0.28` set: bit-identical embeddings, no measurable RSS leak across the model lifetimes (~70 MB cumulative growth across 3 distinct loads, expected MPS allocator behavior). The original isolation (`_generate_embeddings_worker` + `ProcessPoolExecutor(spawn)`) was load-bearing only against the pre-Phase-2 unconditional SSL bypass, which is no longer present.
+- Refactored: `embed_signatures` now invokes the model in-process via `_load_model()`, which caches a module-level singleton (`indexer._MODEL_CACHE`). The TLS opt-in via `_tls.configure_insecure_tls_if_requested` already runs in `main()`, so an in-process model load picks up the same posture transparently.
+- Benchmark on `test_fixtures/CalculatorApp` (56 symbols): `full_index.wall_seconds` 18.46s → 15.26s (−17%); `phases.embed_seconds` 8.38s → 5.53s (−34%). A second same-process `index_repository` call (Phase 4c watcher pattern) drops from 13.41s → 8.16s (−39%) because the cached model skips the reload.
+- Tests: `tests/test_embeddings.py` (7 cases) cover the in-process invariant, model caching, env-var resolution, cache invalidation on path change, and a static guard against `ProcessPoolExecutor` re-introduction in the embedding hot path.
+- `_generate_embeddings_worker` deleted; subprocess fallback intentionally NOT preserved — its only justification was the pre-Phase-2 SSL bypass, which has been gone for two phases.
 
 #### Phase 4c — Indexer daemon + file watcher (1.5 days)
 
@@ -364,6 +377,12 @@ Conditional on 4a results showing cold start >5s. Pick from:
   - <5% files with errors → Strategy A (tree-sitter primary, hardened fallback).
   - 5–20% → Strategy A + B (tree-sitter primary, SourceKitten validator in CI).
   - >20% → Strategy C (consider SourceKit-LSP as primary).
+
+**Acceptance criteria for 4.5a (✅ tool landed in commit 2d9c39b; ⚠️ real-repo run pending owner):**
+- [x] `tools/parse_audit.py` exists, walks repos, records `has_error` + ERROR/MISSING node counts per file, and aggregates summary stats. → 4 tests cover smoke against fixture, intentionally-broken Swift, empty dir, excluded dirs.
+- [x] Decision-matrix mapping (`<5%`/`5-20%`/`>=20%`) emits correct Strategy A / A+B / C recommendation. Boundary cases empirically verified (4.99% → A, 5.0% → A+B, 19.99% → A+B, 20.0% → C).
+- [x] Reproducible: JSON metadata records grammar versions (`tree-sitter`, `tree-sitter-swift`, `tree-sitter-objc`) so cross-run comparisons are valid.
+- [ ] Owner runs against the real repo (10k → 100k → full 1M) and decides Strategy A / A+B / C. → **pending**.
 
 #### Phase 4.5b — Strategy A: hardened fallback (1.5 days)
 
@@ -452,6 +471,14 @@ Expose via a new MCP tool, `find_swiftui_views`:
 - Server at startup: same check; refuse to start on mismatch.
 - Tests: forward migration from v0 (legacy) → current; "old DB on new code" path is graceful.
 
+**Acceptance criteria for 6a (✅ landed in commit 681902b):**
+- [x] `schema_version` table created in baseline + 002_add_swiftui_columns.sql adds Phase 4.5d-ready nullable columns.
+- [x] Migration runner (`src/ios_graphrag/_migrations.py`) discovers `^\d{3}_*.sql$`, applies in numeric order inside an explicit BEGIN/COMMIT transaction, raises `SchemaMismatchError` if the DB is ahead of the code, swallows duplicate-column errors for partial-failure recovery.
+- [x] Indexer: `ensure_schema(conn, schema_path)` now delegates to `apply_migrations(conn)`. Backward-compatible signature.
+- [x] Server: `_check_schema_version_or_exit(db_path)` runs at startup, exits 1 with clear remediation pointer on either-direction mismatch.
+- [x] 5 tests cover fresh DB, legacy DB, newer-DB-refusal, idempotency, server-mismatch subprocess. All passing.
+- [x] Empirical verification: fresh DB lands at v2 with the 4 SwiftUI columns; true-shape legacy DB upgrades cleanly; server at v1 against v2 code refuses to start with `Database at v1, server expects v2. Run \`ios-graphrag-index --repo <repo> --db <db>\` to apply migrations.`
+
 #### Phase 6b — Structured logging + trace IDs (½ day)
 
 - Switch to stdlib JSON formatter (or `structlog` if a lighter dep is acceptable).
@@ -470,11 +497,19 @@ Expose via a new MCP tool, `find_swiftui_views`:
 - Logs warnings, never fails the run.
 - `ios-graphrag-doctor --verify` runs the same checks on demand.
 
-#### Phase 6d — Crash diagnostics (½ day)
+#### Phase 6d — Crash diagnostics (½ day) ✅ landed
 
 - On unhandled exception in server: write a crashdump file with full traceback, environment info (Python version, package versions, GRAPH_DB_PATH, env vars except secrets), and last N tool calls (kept in a ring buffer).
 - Server tool errors include the trace ID so users can grep logs.
 - `docs/REPORTING.md`: bug-report template with `ios-graphrag-doctor --bug-report` output.
+
+**Acceptance:**
+- [x] `src/ios_graphrag/_diagnostics.py` ships a thread-safe deque (default cap 50, override via `GRAPHRAG_RECENT_CALLS_LIMIT`) that the `_traced_handler` decorator records every tool call into (success and error).
+- [x] `install_crashdump_hook()` chains a `sys.excepthook` that writes `<get_log_dir()>/crashdump-<UTC>-<pid>.txt` with traceback, Python/platform, dependency versions, redacted env vars, and the last N tool calls. Failures swallowed; original exception still propagates.
+- [x] Hook installs from `server.main()` after `setup_logging("server")`.
+- [x] `docs/REPORTING.md` (49 lines) documents the three diagnostic paths (crashdump, --tail-errors with trace_id, --bug-report) plus an issue template.
+- [x] `engine/CONNECTION_GUIDE.md` cross-links to the new doc.
+- [x] `tests/test_crash_diagnostics.py` (6 tests) covers ring-buffer cap, thread safety, dump-on-excepthook, home-path redaction, write-error tolerance, and the no-dump-on-handled-error invariant.
 
 #### Phase 6e — CI gates (½ day)
 

@@ -1,3 +1,0 @@
-module CalculatorApp {
-    header "/Users/jgriffin/dev/iOS-GraphRAG/test_fixtures/CalculatorApp/.build/arm64-apple-macosx/debug/CalculatorApp.build/include/CalculatorApp-Swift.h"
-}
