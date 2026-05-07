@@ -23,6 +23,8 @@ dependencies = [
 [project.scripts]
 ios-graphrag-index = "ios_graphrag.indexer:main"
 ios-graphrag-server = "ios_graphrag.server:main"
+ios-graphrag-preflight = "ios_graphrag.preflight:main"
+ios-graphrag-doctor = "ios_graphrag.doctor:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
