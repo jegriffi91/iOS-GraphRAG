@@ -580,6 +580,110 @@ def render_bug_report_extras() -> str:
     return "\n".join(lines)
 
 
+def render_integrity_report(result: dict) -> str:
+    """Format the dict from :func:`_integrity.run_integrity_checks` for humans.
+
+    Output format (Phase 6c)::
+
+        === Integrity verification ===
+        Row counts:
+          nodes:        12345
+          edges:        67890
+          file_hashes:    234
+
+        [OK]      No orphan edges (12000 resolved, 0 dangling).
+        [WARNING] 3 file paths in nodes are no longer on disk:
+          /path/to/Old.swift
+          ...
+        [INFO]    18 symbol names resolve to multiple nodes ...
+
+    Returned as a single string so the caller can decide whether to
+    print, return, or pipe it into another renderer.
+    """
+    counts = result.get("row_counts", {}) or {}
+    orphans = int(result.get("orphan_edges", 0) or 0)
+    resolved = int(result.get("resolved_edges", 0) or 0)
+    missing = list(result.get("missing_files") or [])
+    collisions = int(result.get("symbol_collisions", 0) or 0)
+
+    lines: List[str] = ["", "=== Integrity verification ==="]
+    lines.append("Row counts:")
+    lines.append(f"  nodes:       {counts.get('nodes', 0):>8d}")
+    lines.append(f"  edges:       {counts.get('edges', 0):>8d}")
+    lines.append(f"  file_hashes: {counts.get('file_hashes', 0):>8d}")
+    lines.append("")
+
+    if orphans == 0:
+        lines.append(
+            f"[OK]       No orphan edges ({resolved} resolved, 0 dangling)."
+        )
+    else:
+        lines.append(
+            f"[WARNING]  {orphans} orphan edge(s) detected "
+            f"({resolved} resolved). target_node_id points at a "
+            "non-existent node."
+        )
+
+    if not missing:
+        lines.append("[OK]       All node file_path entries exist on disk.")
+    else:
+        lines.append(
+            f"[WARNING]  {len(missing)} file path(s) in nodes are no "
+            "longer on disk:"
+        )
+        for path in missing[:10]:
+            lines.append(f"  {_redact_home(path)}")
+        if len(missing) > 10:
+            lines.append(f"  ... ({len(missing) - 10} more)")
+
+    lines.append(
+        f"[INFO]     {collisions} symbol name(s) resolve to multiple nodes "
+        "(collisions logged in indexing_errors.log)."
+    )
+    return "\n".join(lines)
+
+
+def run_verify(argv_db: Optional[str] = None) -> int:
+    """Run the Phase 6c integrity checks against the configured DB.
+
+    Returns ``1`` if any WARNING-class issue is found (orphan edges or
+    missing file paths), ``0`` otherwise. Output goes to stdout so the
+    caller can pipe / capture it. ``argv_db`` is unused today but kept
+    in the signature so a future ``--db`` flag can land without
+    changing the call site.
+    """
+    db_path, source = _resolve_db_path()
+    if not db_path.exists():
+        print(
+            f"[ERROR]    DB not found at {db_path} (source: {source}). "
+            "Build the index first with `ios-graphrag-index`."
+        )
+        return 1
+
+    # Local import: keeps the doctor's default-mode start-up cheap and
+    # avoids a hard dep cycle if _integrity ever needs anything from
+    # doctor (it doesn't today, but defensively isolated).
+    from . import _integrity  # noqa: PLC0415
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.Error as exc:
+        print(f"[ERROR]    sqlite open failed: {exc}")
+        return 1
+    try:
+        result = _integrity.run_integrity_checks(conn)
+    finally:
+        conn.close()
+
+    print(render_integrity_report(result))
+
+    has_warning = (
+        int(result.get("orphan_edges", 0) or 0) > 0
+        or bool(result.get("missing_files"))
+    )
+    return 1 if has_warning else 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ios-graphrag-doctor",
@@ -587,7 +691,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "Diagnose iOS-GraphRAG installation health. Default mode prints "
             "one structured line per check; --bug-report appends Python/macOS/"
             "dependency-version detail and a redacted log tail suitable for an "
-            "issue ticket."
+            "issue ticket; --verify runs the Phase 6c integrity checks "
+            "(row counts, orphan edges, missing-file detection) and exits 1 "
+            "on any WARNING-class issue."
         ),
     )
     parser.add_argument(
@@ -595,7 +701,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="Emit a longer, copy-pasteable report (env, deps, log tail) for issue tickets.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help=(
+            "Run Phase 6c integrity checks (row counts, orphan edges, missing "
+            "file paths, symbol collisions) and exit 1 on any WARNING-class "
+            "issue. Skips the default health diagnoses."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.verify:
+        return run_verify()
 
     diagnoses = run_default_diagnoses()
     print(render_default_report(diagnoses))

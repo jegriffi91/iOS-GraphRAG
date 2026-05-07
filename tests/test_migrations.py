@@ -82,36 +82,44 @@ def _node_columns(conn: sqlite3.Connection) -> set[str]:
 
 
 def test_apply_migrations_to_fresh_db():
-    """Empty DB -> baseline + 002 -> version 2 with SwiftUI columns."""
+    """Empty DB -> all migrations applied -> latest version with SwiftUI cols.
+
+    The exact "latest" number is whatever ``max_known_version()`` reports;
+    asserting against that constant keeps the test stable as new migrations
+    land. Phase 6c added 003, so today the latest is 3, but the test
+    intentionally avoids hard-coding that.
+    """
     conn = sqlite3.connect(":memory:")
     try:
         new_version = _migrations.apply_migrations(conn)
-        assert new_version == _migrations.max_known_version()
-        assert new_version == 2, "Phase 6a ships migrations 001 and 002"
-        assert _migrations.current_version(conn) == 2
+        latest = _migrations.max_known_version()
+        assert new_version == latest
+        assert latest >= 2, "baseline + SwiftUI migrations must always exist"
+        assert _migrations.current_version(conn) == latest
 
         cols = _node_columns(conn)
         assert SWIFTUI_COLUMNS <= cols, (
             f"missing SwiftUI columns; got {sorted(cols)}"
         )
 
-        # Both versions stamped in the schema_version table.
+        # Every migration must stamp its version into schema_version.
         rows = conn.execute(
             "SELECT version FROM schema_version ORDER BY version"
         ).fetchall()
-        assert [r[0] for r in rows] == [1, 2]
+        assert [r[0] for r in rows] == list(range(1, latest + 1))
     finally:
         conn.close()
 
 
 def test_apply_migrations_to_legacy_db():
-    """Legacy DB (tables but no schema_version) -> v2 + SwiftUI columns.
+    """Legacy DB (tables but no schema_version) -> latest + SwiftUI columns.
 
     Simulates upgrading an existing user's DB: all the pre-6a tables
     exist, there is no schema_version table, and no rows have been
-    populated. The runner must promote it to v2 without erroring on
-    duplicate CREATE TABLE statements (001_baseline uses IF NOT EXISTS)
-    and must add the new SwiftUI columns.
+    populated. The runner must promote it to the latest known version
+    without erroring on duplicate CREATE TABLE statements
+    (001_baseline uses IF NOT EXISTS) and must add the SwiftUI columns
+    introduced in 002.
     """
     conn = sqlite3.connect(":memory:")
     try:
@@ -128,7 +136,7 @@ def test_apply_migrations_to_legacy_db():
         assert _migrations.current_version(conn) == 0
 
         new_version = _migrations.apply_migrations(conn)
-        assert new_version == 2
+        assert new_version == _migrations.max_known_version()
 
         cols = _node_columns(conn)
         assert SWIFTUI_COLUMNS <= cols
@@ -161,6 +169,7 @@ def test_idempotent_application():
     """Two consecutive apply_migrations calls leave the DB unchanged."""
     conn = sqlite3.connect(":memory:")
     try:
+        latest = _migrations.max_known_version()
         v1 = _migrations.apply_migrations(conn)
         rows1 = conn.execute(
             "SELECT version FROM schema_version ORDER BY version"
@@ -171,7 +180,7 @@ def test_idempotent_application():
             "SELECT version FROM schema_version ORDER BY version"
         ).fetchall()
 
-        assert v1 == v2 == 2
+        assert v1 == v2 == latest
         assert rows1 == rows2, (
             "second apply_migrations must not re-stamp version rows"
         )
@@ -182,21 +191,24 @@ def test_idempotent_application():
 def test_server_refuses_to_start_on_mismatch(tmp_path: Path):
     """Older DB on newer code: server exits 1 with remediation message.
 
-    Builds a DB at v1 (only 001_baseline applied, missing the SwiftUI
-    columns from 002), runs the server binary, and asserts it logs an
-    error directing the user to rerun the indexer and exits 1 -- never
-    reaches mcp.run().
+    Builds a DB at v1 (only 001_baseline applied), runs the server
+    binary, and asserts it logs an error directing the user to rerun
+    the indexer and exits 1 -- never reaches mcp.run(). Asserts the
+    output names both v1 (the stale DB) and the latest known version
+    so the user can see exactly what's expected.
     """
     db_path = tmp_path / "stale.sqlite"
     conn = sqlite3.connect(str(db_path))
     try:
         # Apply only 001 by hand-running its body, leaving us at v1
-        # (server expects v2).
+        # while the code knows about higher versions.
         baseline = _migrations.MIGRATIONS_DIR / "001_baseline.sql"
         _migrations._apply_one(conn, 1, baseline)
         assert _migrations.current_version(conn) == 1
     finally:
         conn.close()
+
+    latest = _migrations.max_known_version()
 
     env = os.environ.copy()
     env["GRAPH_DB_PATH"] = str(db_path)
@@ -215,8 +227,8 @@ def test_server_refuses_to_start_on_mismatch(tmp_path: Path):
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stderr + result.stdout
-    assert "v1" in combined and "v2" in combined, (
-        f"expected version mismatch (v1 vs v2) in output, got:\n"
+    assert "v1" in combined and f"v{latest}" in combined, (
+        f"expected version mismatch (v1 vs v{latest}) in output, got:\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "ios-graphrag-index" in combined or "Run" in combined, (

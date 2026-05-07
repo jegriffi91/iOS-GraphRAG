@@ -1084,9 +1084,13 @@ def upsert_edges(
             (file_path,),
         )
         if edges:
+            # INSERT OR IGNORE so that duplicates produced by build_edges_for_file
+            # (e.g. a function that calls the same callee twice on the same line)
+            # are silently dropped under the Phase 6c unique-index gate, rather
+            # than aborting the per-file transaction with IntegrityError.
             conn.executemany(
                 """
-                INSERT INTO edges (source_node_id, target_node_id, target_symbol, edge_type, line_number)
+                INSERT OR IGNORE INTO edges (source_node_id, target_node_id, target_symbol, edge_type, line_number)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 edges,
@@ -1163,9 +1167,11 @@ def rebuild_bridging_edges(conn: sqlite3.Connection, use_savepoints: bool, savep
             if objc_id:
                 data.append((source_id, objc_id, target_symbol, "BRIDGING", line_number))
         if data:
+            # INSERT OR IGNORE for the same reason as upsert_edges: tolerate
+            # duplicate-row tuples under the Phase 6c unique-index gate.
             conn.executemany(
                 """
-                INSERT INTO edges (source_node_id, target_node_id, target_symbol, edge_type, line_number)
+                INSERT OR IGNORE INTO edges (source_node_id, target_node_id, target_symbol, edge_type, line_number)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 data,
@@ -1435,6 +1441,15 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
 
     if full_reindex:
         conn.commit()
+
+    # Phase 6c integrity check. Fail-soft: any exception in here is logged
+    # as a warning by the helper itself and never aborts the indexing run.
+    try:
+        from . import _integrity  # local import to avoid widening import-time cost
+        _integrity.log_integrity_check(conn)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("integrity check wrapper failed: %s: %s", type(exc).__name__, exc)
+
     conn.close()
     elapsed = time.time() - start_time
     n_failed = len(failed_paths)
