@@ -14,7 +14,7 @@ import numpy as np
 from mcp.server.fastmcp import FastMCP
 from sentence_transformers import SentenceTransformer
 
-from . import _tls
+from . import _migrations, _tls
 
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
@@ -42,6 +42,47 @@ NODE_META: Dict[int, Dict[str, str]] = {}
 MODEL = None
 EMBEDDING_MATRIX = None   # np.ndarray [N, dim], L2-normalized
 EMBEDDING_IDS = []         # List[(id, path, name)] matching matrix rows
+
+
+def _check_schema_version_or_exit(db_path: str) -> None:
+    """Verify the DB schema matches what this build expects.
+
+    Phase 6a contract: the server never writes schema changes (the
+    indexer owns that, to avoid concurrent-writer races). At startup we
+    read ``MAX(schema_version.version)`` and compare against the
+    highest migration this code knows about. Any mismatch is fatal:
+    older DB on newer code -> rerun the indexer; newer DB on older
+    code -> upgrade ios-graphrag.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        try:
+            db_v = _migrations.current_version(conn)
+        except Exception as exc:
+            log.error("Failed to read schema_version from %s: %s", db_path, exc)
+            sys.exit(1)
+    finally:
+        conn.close()
+
+    code_v = _migrations.max_known_version()
+    if db_v < code_v:
+        log.error(
+            "Database at v%d, server expects v%d. "
+            "Run `ios-graphrag-index --repo <repo> --db %s` to apply migrations.",
+            db_v,
+            code_v,
+            db_path,
+        )
+        sys.exit(1)
+    if db_v > code_v:
+        log.error(
+            "Database at v%d, server only knows up to v%d. "
+            "Upgrade ios-graphrag.",
+            db_v,
+            code_v,
+        )
+        sys.exit(1)
+    log.info("Database schema v%d", db_v)
 
 
 def load_graph(db_path: str) -> None:
@@ -297,6 +338,12 @@ def main() -> None:
                 f"See engine/CONNECTION_GUIDE.md for setup instructions."
             )
             sys.exit(1)
+
+        # Phase 6a: schema-version gate. The server never auto-applies
+        # migrations (that would race against a concurrent indexer
+        # process); it only verifies that the DB matches the schema this
+        # build was compiled against and refuses to start otherwise.
+        _check_schema_version_or_exit(db_path)
 
         load_graph(db_path)
         log.info("Graph loaded. Starting MCP stdio server...")

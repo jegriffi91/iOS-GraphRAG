@@ -24,7 +24,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_objc
 import tree_sitter_swift
 
-from . import _tls
+from . import _migrations, _tls
 
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
@@ -762,12 +762,18 @@ def parse_file(path: str) -> ParseResult:
 
 
 def ensure_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='file_hashes'"
-    )
-    if cursor.fetchone():
-        return
-    conn.executescript(schema_path.read_text(encoding="utf-8"))
+    """Apply any unapplied schema migrations to ``conn``.
+
+    Phase 6a replaced the previous executescript-of-schema.sql flow with
+    a migration runner. ``schema_path`` is no longer read directly --
+    ``001_baseline.sql`` is a CREATE-TABLE-IF-NOT-EXISTS rollup of the
+    schema, so a fresh DB and a legacy DB (existing tables, no
+    schema_version row) both reach the latest version through the same
+    code path. The parameter is retained for API compatibility with
+    callers/tests that pass it.
+    """
+    new_version = _migrations.apply_migrations(conn)
+    log.info("schema at v%d after migration check", new_version)
 
 
 def load_hashes(conn):
