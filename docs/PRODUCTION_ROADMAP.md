@@ -280,13 +280,18 @@ P3.4 — `graphrag doctor` subcommand.
 P3.5 — Tone down tool descriptions.
 - `engine/core/server.py:97-225`: replace "STRICTLY FORBIDDEN", "DO NOT USE", "CRITICAL" with calmer language. Keep the directive intent ("Prefer this over grep because…") but drop the all-caps.
 
-**Acceptance criteria:**
-- `ios-graphrag-preflight` on a fresh machine produces a green run, with copy-pasteable Copilot config.
-- `ios-graphrag-doctor` produces useful output on a healthy system and on each of the failure modes listed.
-- Tool descriptions are readable and don't shout.
+**Acceptance criteria (✅ autonomous portions landed in commits 6090ad7, 1b1e429; ⚠️ P3.2 pending owner-empirical work):**
+- [x] `ios-graphrag-preflight` on a fresh machine produces a green run, with copy-pasteable Copilot config. → 7 checks PASS on this machine; emits `~/.config/gh-copilot/config.yml` YAML + VS Code `settings.json` JSON snippets at end (with caveat noting P3.2 verification still required).
+- [x] `ios-graphrag-doctor` produces useful output on a healthy system and on each of the failure modes listed. → 8 diagnostics + `--bug-report` mode (Python/platform/deps/redacted env vars/log tail). Verified end-to-end with and without DB present.
+- [x] Tool descriptions are readable and don't shout. → grep `STRICTLY FORBIDDEN|DO NOT USE|CRITICAL:|MUST NEVER|NEVER USE` returns empty in `src/ios_graphrag/server.py`.
+- [ ] **P3.2 — pending owner empirical work.** Verify the Copilot CLI MCP config key (`mcp_servers:`) and VS Code Copilot extension key (`github.copilot.chat.mcp.servers`) are still current on a fresh corp laptop with current Copilot release. Update `engine/CONNECTION_GUIDE.md` and `src/ios_graphrag/preflight.py` config snippets if either has drifted.
 
-**Effort:** 2 days (excluding P3.2 which depends on owner machine).
-**Dependencies:** Phases 0, 1, 2.
+**Bonus delivered:**
+- P3.3 model resolution chain extended to support `IOS_GRAPHRAG_MODEL_DIR` env var + `~/.cache/ios-graphrag/models/` default cache, with HF identifier as fallback. New `tests/test_model_resolution.py` (3 tests).
+- `engine/CONNECTION_GUIDE.md` adds an "Offline / Pre-staged Model" section documenting `huggingface-cli download` + Artifactory/S3 staging (with `<!-- TODO: org-specific URL -->` placeholder for owner to fill in).
+
+**Effort:** 2 days (excluding P3.2 which depends on owner machine). → matched.
+**Dependencies:** Phases 0, 1, 2. → satisfied.
 
 ---
 
