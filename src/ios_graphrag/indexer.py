@@ -165,6 +165,40 @@ class Symbol:
     extends: Optional[str]
     calls: List[str]
     selector: Optional[str] = None  # Swift selector: "funcName(_:label:)"
+    # Phase 4.5d SwiftUI enrichment columns. NULL for symbols where the
+    # detection doesn't apply (e.g. `is_swiftui_view` is only set on
+    # struct/class declarations, never on free functions).
+    is_swiftui_view: Optional[bool] = None
+    is_observable: Optional[bool] = None
+    state_kind: Optional[str] = None
+    body_kind: Optional[str] = None
+
+
+# Phase 4.5d: SwiftUI / Combine / SwiftData property-wrapper attribute names
+# mapped to the column value the extractor writes into ``nodes.state_kind``.
+# Order is documentation-only — when stacked wrappers are encountered (rare
+# but possible: e.g. ``@MainActor @State``), the extractor picks the FIRST
+# matching attribute it encounters in source order. This is documented in
+# README.md's Symbol Types section so the precedence is contractually visible.
+_STATE_KIND_BY_ATTRIBUTE: Dict[str, str] = {
+    "State": "state",
+    "Binding": "binding",
+    "StateObject": "stateobject",
+    "ObservedObject": "observedobject",
+    "EnvironmentObject": "environmentobject",
+    "Environment": "environment",
+    "AppStorage": "appstorage",
+    "SceneStorage": "scenestorage",
+    "FetchRequest": "fetchrequest",
+    "Query": "query",
+    "Published": "published",
+}
+
+# Class-level attribute names that flip ``is_observable``. Property-level
+# wrappers (e.g. ``@Published``) are intentionally NOT here -- ``is_observable``
+# is a class-shape signal, while ``@Published`` is captured per-property via
+# ``state_kind``.
+_OBSERVABLE_CLASS_ATTRIBUTES = frozenset({"Observable", "Model"})
 
 
 @dataclass
@@ -534,6 +568,209 @@ def is_computed_property(prop_node) -> bool:
     return any(child.type == "computed_property" for child in prop_node.children)
 
 
+def _attribute_names(node) -> List[str]:
+    """Return the type-identifier names of every ``@Foo(...)`` attribute on ``node``.
+
+    The Tree-sitter Swift grammar nests attributes under a ``modifiers``
+    child, where each ``attribute`` node contains an ``@`` token followed by
+    a ``user_type`` whose ``type_identifier`` is the attribute's bare name::
+
+        modifiers
+          attribute
+            @
+            user_type
+              type_identifier   <- e.g. "State", "Observable"
+            ( ... )             <- optional argument list
+
+    Returns names in source order. An empty list means the node has no
+    attached attributes. Used for both class-level (``@Observable``,
+    ``@Model``) and property-level (``@State``, ``@Binding``, etc.) lookups.
+    """
+    names: List[str] = []
+    for child in node.children:
+        if child.type != "modifiers":
+            continue
+        for modifier_child in child.children:
+            if modifier_child.type != "attribute":
+                continue
+            for attr_child in modifier_child.children:
+                if attr_child.type == "user_type":
+                    for inner in attr_child.children:
+                        if inner.type == "type_identifier":
+                            names.append(inner.text.decode("utf-8", errors="ignore"))
+                            break
+                    break
+    return names
+
+
+def _detect_swiftui_view(class_decl_node, actual_type: str) -> bool:
+    """Return True if ``class_decl_node`` declares a SwiftUI View-related type.
+
+    Triggers: any inheritance specifier whose type identifier is exactly
+    ``View``, exactly ``ViewModifier``, or ends with ``View`` (e.g.
+    ``CustomView``). Suffix matching is intentional -- SwiftUI types in the
+    real codebase routinely subclass app-specific intermediate Views, and
+    the column is meant as a "this participates in the SwiftUI view tree"
+    flag rather than strict-View-conformance.
+
+    Only fires for ``struct`` and ``class`` (Swift's two View-eligible
+    type kinds); ``enum``/``protocol``/``extension``/``actor`` cannot
+    declare a View, so we skip them to keep the column NULL there.
+    """
+    if actual_type not in {"struct", "class"}:
+        return False
+    inheritance_types = []
+    for child in class_decl_node.children:
+        if child.type == "inheritance_specifier":
+            for sub in child.children:
+                if sub.type == "user_type":
+                    for inner in sub.children:
+                        if inner.type == "type_identifier":
+                            inheritance_types.append(
+                                inner.text.decode("utf-8", errors="ignore")
+                            )
+                elif sub.type == "type_identifier":
+                    inheritance_types.append(sub.text.decode("utf-8", errors="ignore"))
+    for type_name in inheritance_types:
+        normalized = normalize_type_name(type_name)
+        if normalized == "View" or normalized == "ViewModifier" or normalized.endswith("View"):
+            return True
+    return False
+
+
+def _detect_observable_class(class_decl_node, actual_type: str) -> bool:
+    """Return True if ``class_decl_node`` is a class with @Observable or @Model.
+
+    Per Phase 4.5d's policy decision: ``is_observable`` reflects ONLY the
+    class-level macro/attribute (``@Observable`` from Swift Observation,
+    ``@Model`` from SwiftData). ``@Published`` is intentionally NOT
+    considered here -- it's a property-level Combine wrapper captured via
+    ``state_kind`` instead.
+
+    Only fires for ``class``; structs/enums/protocols cannot be
+    @Observable/@Model in the language.
+    """
+    if actual_type != "class":
+        return False
+    return any(name in _OBSERVABLE_CLASS_ATTRIBUTES for name in _attribute_names(class_decl_node))
+
+
+def _detect_property_state_kind(prop_node) -> Optional[str]:
+    """Return the SwiftUI/Combine state-kind for a property, or None.
+
+    Iterates the property's attributes in source order and returns the
+    value mapped to the FIRST recognized wrapper. Stacked wrappers
+    (``@MainActor @State`` etc.) are valid Swift, but we deliberately
+    only surface the first matching one because:
+      (a) the wrappers we care about are mutually exclusive in practice,
+      (b) the column is a flat TEXT, not a list, so picking-and-documenting
+          is simpler than encoding a precedence rule per pair.
+    """
+    for name in _attribute_names(prop_node):
+        kind = _STATE_KIND_BY_ATTRIBUTE.get(name)
+        if kind is not None:
+            return kind
+    return None
+
+
+def _has_some_view_return(prop_node) -> bool:
+    """Return True if the property's type annotation is ``some View``.
+
+    Tree-sitter Swift represents ``var body: some View { ... }`` as::
+
+        property_declaration
+          ...
+          type_annotation
+            :
+            opaque_type
+              some
+              user_type
+                type_identifier   <- "View"
+
+    We walk to the ``opaque_type`` child of the ``type_annotation`` and
+    inspect the inner ``user_type``'s ``type_identifier``. Anything that
+    isn't exactly ``View`` (``some Hashable``, ``some Collection``,
+    ``some MyView``) is intentionally NOT marked as ``viewbody`` -- the
+    column is reserved for the View-tree primary entry point, which by
+    convention is ``some View``.
+    """
+    for child in prop_node.children:
+        if child.type != "type_annotation":
+            continue
+        for sub in child.children:
+            if sub.type != "opaque_type":
+                continue
+            for inner in sub.children:
+                if inner.type == "user_type":
+                    for tid in inner.children:
+                        if tid.type == "type_identifier":
+                            return tid.text.decode("utf-8", errors="ignore") == "View"
+    return False
+
+
+def _detect_property_body_kind(prop_node, prop_name: Optional[str]) -> Optional[str]:
+    """Return ``body_kind`` for a computed-property declaration, or None.
+
+    Two paths:
+      * ``var body: some View { ... }`` -> ``"viewbody"``. The combination
+        of name == "body" AND opaque-type return ``some View`` is what
+        SwiftUI's protocol requires; matching both reduces false positives
+        from accidental ``body``-named properties on non-View types.
+      * ``@ViewBuilder var foo: some View { ... }`` -> ``"resultbuilder"``.
+        Any computed property tagged with ``@ViewBuilder`` -- distinct from
+        the SwiftUI `body` entry point.
+
+    Returns None for stored properties and for computed properties that
+    match neither pattern.
+    """
+    if not is_computed_property(prop_node):
+        return None
+    attrs = _attribute_names(prop_node)
+    if "ViewBuilder" in attrs:
+        return "resultbuilder"
+    if prop_name == "body" and _has_some_view_return(prop_node):
+        return "viewbody"
+    return None
+
+
+def _function_has_some_view_return(func_node) -> bool:
+    """Return True if the function declaration has return type ``some View``.
+
+    Tree-sitter Swift puts the return type as a top-level
+    ``opaque_type`` child of ``function_declaration`` (no intervening
+    ``type_annotation`` wrapper -- functions use ``->`` syntax).
+    """
+    for child in func_node.children:
+        if child.type != "opaque_type":
+            continue
+        for inner in child.children:
+            if inner.type == "user_type":
+                for tid in inner.children:
+                    if tid.type == "type_identifier":
+                        return tid.text.decode("utf-8", errors="ignore") == "View"
+    return False
+
+
+def _detect_function_body_kind(func_node) -> Optional[str]:
+    """Return ``body_kind`` for a function declaration, or None.
+
+    A function annotated with ``@ViewBuilder`` (or any other Swift result
+    builder; we currently only flag ViewBuilder) is tagged
+    ``"resultbuilder"``. Free functions whose return type is ``some View``
+    but lack the ``@ViewBuilder`` annotation are still 'just functions'
+    in the SwiftUI sense -- the result-builder transform doesn't apply,
+    so we leave ``body_kind`` NULL for them.
+
+    Functions that match neither pattern get NULL (rather than
+    ``"regular"``) so the column stays sparse and queries against
+    ``WHERE body_kind IS NOT NULL`` only surface the symbols that
+    participate in the View tree.
+    """
+    if "ViewBuilder" in _attribute_names(func_node):
+        return "resultbuilder"
+    return None
+
+
 def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[str]]:
     """Extract symbols from Swift code using manual tree walking.
 
@@ -592,6 +829,10 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     extends = name_text
                     conforms = inheritance_types
 
+                # Phase 4.5d SwiftUI enrichment.
+                is_swiftui_view = _detect_swiftui_view(node, actual_type) or None
+                is_observable = _detect_observable_class(node, actual_type) or None
+
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -606,6 +847,8 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         conforms=conforms,
                         extends=extends,
                         calls=[],
+                        is_swiftui_view=is_swiftui_view,
+                        is_observable=is_observable,
                     )
                 )
             # Still recurse to find nested types
@@ -679,6 +922,12 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                     if child.type == "function_body":
                         extract_calls_from_node(child)
 
+                # Phase 4.5d SwiftUI enrichment for functions: only @ViewBuilder
+                # functions get a body_kind. Plain `some View`-returning functions
+                # without @ViewBuilder do not get the result-builder transform, so
+                # leaving body_kind NULL there is intentional.
+                body_kind = _detect_function_body_kind(node)
+
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -694,6 +943,7 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         extends=None,
                         calls=calls,
                         selector=selector,
+                        body_kind=body_kind,
                     )
                 )
             return
@@ -710,6 +960,11 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                 signature = extract_signature_line(code_bytes, node.start_byte)
                 line_number = node.start_point[0] + 1
                 prop_kind = "computed_property" if is_computed_property(node) else "property"
+                # Phase 4.5d SwiftUI enrichment for properties: state_kind from
+                # @State/@Binding/@StateObject/etc., body_kind from `body: some
+                # View` or @ViewBuilder.
+                state_kind = _detect_property_state_kind(node)
+                body_kind = _detect_property_body_kind(node, prop_name)
                 symbols.append(
                     Symbol(
                         file_path="",
@@ -724,6 +979,8 @@ def extract_swift_symbols(code_bytes: bytes, tree) -> Tuple[List[Symbol], List[s
                         conforms=[],
                         extends=None,
                         calls=[],
+                        state_kind=state_kind,
+                        body_kind=body_kind,
                     )
                 )
             return
@@ -1064,12 +1321,20 @@ def update_file_index(
             (file_path, file_hash),
         )
         if symbols:
+            # Phase 4.5d: named-column INSERT to keep this resilient against
+            # future column-order skew. Migration 004 (Phase 5 P0's
+            # symbol_type CHECK rebuild) explicitly preserved the column
+            # order baseline ∪ 002 ∪ migration-004's CHECK extension --
+            # using ``INSERT INTO nodes (col, col, ...) VALUES (...)`` here
+            # means a future migration that inserts a column at a non-tail
+            # position cannot silently mis-bind values.
             conn.executemany(
                 """
                 INSERT INTO nodes (
                     file_path, symbol_name, symbol_type, language,
-                    start_byte, end_byte, line_number, signature, selector
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    start_byte, end_byte, line_number, signature, selector,
+                    is_swiftui_view, is_observable, state_kind, body_kind
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -1082,6 +1347,13 @@ def update_file_index(
                         symbol.line_number,
                         symbol.signature,
                         symbol.selector,
+                        # SQLite stores Python bool as 0/1 in BOOLEAN columns;
+                        # None stays NULL. Cast explicitly so the column reads
+                        # back as 1/0/NULL (matching the test predicates).
+                        1 if symbol.is_swiftui_view else (None if symbol.is_swiftui_view is None else 0),
+                        1 if symbol.is_observable else (None if symbol.is_observable is None else 0),
+                        symbol.state_kind,
+                        symbol.body_kind,
                     )
                     for symbol in symbols
                 ],

@@ -505,6 +505,120 @@ def _semantic_search(
     }
 
 
+@mcp.tool(
+    name="find_swiftui_views",
+    description=(
+        "SwiftUI view explorer. Lists every type marked `is_swiftui_view=1` "
+        "(struct/class with View / ViewModifier / *View conformance), with "
+        "the state-binding kinds each view declares. "
+        "Optionally filter to views that depend on a particular `state_kind` "
+        "(e.g. 'stateobject' to find every view that owns a StateObject), "
+        "or restrict to views whose state-binding chain traces back to an "
+        "@Observable / @Model class via `observable_only=True`. "
+        "Prefer this over grep — text matching for `: View` misses inherited "
+        "View conformance and cannot correlate property wrappers across files."
+    ),
+)
+@_traced_handler(tool_name="find_swiftui_views")
+def _find_swiftui_views(
+    state_kind: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Optional state_kind filter. If set, only views with at least "
+                "one property whose state_kind matches are returned. Valid "
+                "values mirror the property-wrapper kinds the indexer "
+                "extracts: 'state', 'binding', 'stateobject', 'observedobject', "
+                "'environmentobject', 'environment', 'appstorage', "
+                "'scenestorage', 'fetchrequest', 'query', 'published'."
+            ),
+        ),
+    ] = None,
+    observable_only: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=(
+                "If True, restrict to views whose containing file declares "
+                "at least one @Observable / @Model class. Approximation: we "
+                "use file-locality rather than full data-flow tracing. "
+                "Cross-file view/observable relationships are NOT detected."
+            ),
+        ),
+    ] = False,
+) -> dict:
+    _reload_if_stale()
+    db_path = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
+    conn = sqlite3.connect(db_path)
+    try:
+        # The base query joins each View row against its OWN properties via
+        # byte-range containment. File-locality alone (``p.file_path =
+        # n.file_path``) would attribute every state-bearing property in the
+        # file to every View in that file -- when LoginView and ProfileBadge
+        # share a file, both would report each other's state kinds. The
+        # ``BETWEEN`` predicate restricts each View's state list to
+        # properties physically nested inside its declaration's byte range.
+        #
+        # Tradeoff: adjacent same-file Views are now correctly disambiguated,
+        # but a View that programmatically wires up state via a separate
+        # type (e.g. ``@StateObject var auth = AuthState()`` where AuthState
+        # has its own properties) is intentionally NOT traced here -- this
+        # is a structural query, not a data-flow analysis.
+        sql = """
+            SELECT n.symbol_name AS swift_class,
+                   n.file_path   AS file_path,
+                   GROUP_CONCAT(DISTINCT p.state_kind) AS states
+            FROM nodes n
+            LEFT JOIN nodes p
+              ON p.file_path = n.file_path
+              AND p.symbol_type IN ('property', 'computed_property')
+              AND p.state_kind IS NOT NULL
+              AND p.start_byte >= n.start_byte
+              AND p.end_byte <= n.end_byte
+            WHERE n.is_swiftui_view = 1
+        """
+        params: list = []
+        if observable_only:
+            # Approximation: a View "depends on" an @Observable / @Model
+            # class only if such a class lives in the same file. A real
+            # data-flow analysis would resolve property types
+            # (e.g. ``@StateObject var auth = AuthState()`` -> AuthState
+            # is @Observable) -- that's deferred to a later phase.
+            sql += " AND n.file_path IN (SELECT file_path FROM nodes WHERE is_observable = 1)"
+        sql += " GROUP BY n.symbol_name, n.file_path"
+        if state_kind is not None:
+            # HAVING-based filter: GROUP_CONCAT produces a comma-separated
+            # list, so we substring-match the requested kind. Wrapped in
+            # commas on both sides so 'state' doesn't accidentally match
+            # 'stateobject'.
+            sql += " HAVING (',' || IFNULL(states, '') || ',') LIKE ?"
+            params.append(f"%,{state_kind},%")
+        sql += " ORDER BY n.file_path, n.symbol_name"
+
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    views = []
+    for swift_class, file_path, states in rows:
+        # GROUP_CONCAT returns NULL when the LEFT JOIN matched nothing
+        # (no state-bearing properties). Surface as an empty list rather
+        # than a None so the schema is consistent.
+        state_list = sorted(states.split(",")) if states else []
+        views.append(
+            {
+                "swift_class": swift_class,
+                "file_path": file_path,
+                "states": state_list,
+            }
+        )
+    return {
+        "count": len(views),
+        "views": views,
+    }
+
+
 def main() -> None:
     # Argparse is intentionally minimal: the server's primary contract is
     # "spawned with no args by an MCP client". --cert-bundle is the only

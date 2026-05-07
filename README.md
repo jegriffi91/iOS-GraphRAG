@@ -54,11 +54,36 @@ The `nodes.symbol_type` column tags every indexed symbol. The current set
 - `initializer` — `init` declarations (plain, failable, convenience, required)
 - `deinitializer` — `deinit` blocks
 
+### SwiftUI enrichment columns
+
+Migration 002 adds four nullable columns (populated for Swift symbols by
+the Phase 4.5d extractor) for SwiftUI- and Combine-aware querying:
+
+- `is_swiftui_view` (`BOOLEAN`) — set on struct/class declarations whose
+  inheritance list includes `View`, `ViewModifier`, or any name ending
+  in `View`.
+- `is_observable` (`BOOLEAN`) — set on class declarations annotated with
+  `@Observable` (Swift Observation) or `@Model` (SwiftData). Note:
+  `@Published` is property-level and does NOT flip this column;
+  `@Published` is captured per-property via `state_kind` instead.
+- `state_kind` (`TEXT`) — set on properties decorated with a known
+  reactivity wrapper. Values: `state`, `binding`, `stateobject`,
+  `observedobject`, `environmentobject`, `environment`, `appstorage`,
+  `scenestorage`, `fetchrequest`, `query`, `published`. When multiple
+  wrappers are stacked, the FIRST matching wrapper in source order
+  wins.
+- `body_kind` (`TEXT`) — set to `viewbody` on the SwiftUI `body: some View`
+  computed property and to `resultbuilder` on `@ViewBuilder` functions
+  / computed properties. NULL on regular functions and stored
+  properties.
+
+The `find_swiftui_views` MCP tool surfaces these columns -- see below.
+
 ---
 
 ## MCP Tools
 
-The server exposes four tools to AI clients via the Model Context Protocol:
+The server exposes five tools to AI clients via the Model Context Protocol:
 
 ### `semantic_search`
 Find code by **meaning**, not just text matching. Uses AI embeddings for semantic similarity.
@@ -103,6 +128,20 @@ Read the **live source code** for a specific symbol using its byte range.
 Find all Swift classes that inherit from Objective-C classes.
 
 **Returns:** Count and details of Swift/ObjC bridging relationships.
+
+---
+
+### `find_swiftui_views`
+List every SwiftUI `View` (`is_swiftui_view=1`) along with the
+state-binding kinds it declares (`@State`, `@StateObject`, `@Binding`, etc.).
+Backed by the migration-002 SwiftUI enrichment columns.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `state_kind` | `string?` | Optional. Restrict to Views with at least one property whose `state_kind` matches (e.g. `'stateobject'`). |
+| `observable_only` | `bool` | Optional, default `False`. Restrict to Views in files that declare at least one `@Observable` / `@Model` class (file-locality approximation). |
+
+**Returns:** Count and per-View list of `{swift_class, file_path, states}`.
 
 ---
 
