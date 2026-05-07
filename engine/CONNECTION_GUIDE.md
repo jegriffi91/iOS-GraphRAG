@@ -41,6 +41,8 @@ GRAPH_DB_PATH=/absolute/path/to/knowledge-graph.sqlite \
 
 This creates `knowledge-graph.sqlite`. **Write down its absolute path** — you need it next.
 
+For automatic incremental reindex on file changes, see [`dist/launchd/README.md`](../dist/launchd/README.md) for the watcher daemon.
+
 ---
 
 ## Step 3 — Register the Server

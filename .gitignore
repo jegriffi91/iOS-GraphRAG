@@ -6,7 +6,12 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# Ignore typical Python ``dist/`` build output (sdist + wheels) without
+# swallowing the launchd plist + README under ``dist/launchd/`` that
+# Phase 4c ships as a distribution asset. The exclusion pattern below
+# ignores everything in ``dist/`` EXCEPT ``dist/launchd/``.
+dist/*
+!dist/launchd/
 downloads/
 eggs/
 .eggs/
