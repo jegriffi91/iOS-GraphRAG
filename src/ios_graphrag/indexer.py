@@ -854,24 +854,86 @@ def resolve_symbol_ids(conn: sqlite3.Connection, file_paths: List[str]) -> Dict[
 
 
 def resolve_all_symbol_ids(conn: sqlite3.Connection) -> Dict[str, List[int]]:
+    """Build a name -> list-of-node-ids map for unresolved-edge fallbacks.
+
+    Determinism (P1.3a): the SELECT is sorted by ``(file_path, start_byte, id)``
+    so candidate lists for tie-broken names are reproducible across runs
+    regardless of dict insertion order from upstream parsing. Edge resolution
+    in ``build_edges_for_file`` and ``update_unresolved_edges`` always picks
+    ``target_ids[0]``; with this ordering, "first" is now stable.
+
+    Observability (P1.3b): when the same name maps to >1 node, emits a
+    ``log.warning`` with each candidate's ``(file_path, line_number)``. The
+    warning travels through the root logger configured in ``main()`` and
+    lands in ``indexing_errors.log``.
+    """
     name_map: Dict[str, List[int]] = {}
-    for row in conn.execute("SELECT id, symbol_name FROM nodes"):
-        node_id, symbol_name = row
+    candidates: Dict[str, List[Tuple[str, Optional[int]]]] = {}
+    rows = conn.execute(
+        "SELECT id, symbol_name, file_path, line_number "
+        "FROM nodes "
+        "ORDER BY symbol_name, file_path, start_byte, id"
+    )
+    for node_id, symbol_name, file_path, line_number in rows:
         name_map.setdefault(symbol_name, []).append(node_id)
+        candidates.setdefault(symbol_name, []).append((file_path, line_number))
+
+    for name, ids in name_map.items():
+        if len(ids) > 1:
+            log.warning(
+                "name collision: %r resolves to %d candidates: %s",
+                name,
+                len(ids),
+                candidates[name],
+            )
+
     return name_map
 
 
 def resolve_selector_ids(conn: sqlite3.Connection) -> Dict[str, int]:
     """Build a map from selector to node ID for function call resolution.
-    
+
     This enables accurate overload resolution by matching full selectors
     like "test(_:)" instead of just "test".
+
+    Determinism (P1.3a): the SELECT is sorted by ``(file_path, start_byte,
+    id)`` so when two functions share a selector, the first one in that
+    order wins reproducibly. Without the ORDER BY, a SQLite scan order
+    can vary, leaving the picked target dependent on insertion history.
+
+    Observability (P1.3b): when a selector would overwrite an existing
+    entry, log a warning naming both the previous and the would-be
+    replacement so cross-module collisions are auditable.
     """
     selector_map: Dict[str, int] = {}
-    for row in conn.execute("SELECT id, selector FROM nodes WHERE selector IS NOT NULL"):
-        node_id, selector = row
-        if selector:
-            selector_map[selector] = node_id
+    selector_origin: Dict[str, Tuple[str, Optional[int]]] = {}
+    collisions: Dict[str, List[Tuple[str, Optional[int]]]] = {}
+    rows = conn.execute(
+        "SELECT id, selector, file_path, line_number "
+        "FROM nodes "
+        "WHERE selector IS NOT NULL "
+        "ORDER BY selector, file_path, start_byte, id"
+    )
+    for node_id, selector, file_path, line_number in rows:
+        if not selector:
+            continue
+        if selector in selector_map:
+            # Track the collision but keep the original (first by sort key) winner.
+            collisions.setdefault(selector, [selector_origin[selector]]).append(
+                (file_path, line_number)
+            )
+            continue
+        selector_map[selector] = node_id
+        selector_origin[selector] = (file_path, line_number)
+
+    for selector, candidates in collisions.items():
+        log.warning(
+            "selector collision: %r has %d candidates: %s (kept first; rest ignored)",
+            selector,
+            len(candidates),
+            candidates,
+        )
+
     return selector_map
 
 
@@ -1035,8 +1097,17 @@ def update_unresolved_edges(
     use_savepoints: bool,
     savepoint_name: str,
 ) -> None:
+    """Resolve previously-unresolved edges using the deterministic name_map.
+
+    Determinism (P1.3a): the SELECT is sorted by edge id so updates are
+    applied in a reproducible order. ``target_ids[0]`` already wins because
+    ``resolve_all_symbol_ids`` sorts candidates; this query order makes the
+    sequence of UPDATEs themselves stable as well.
+    """
     rows = conn.execute(
-        "SELECT id, target_symbol FROM edges WHERE target_node_id IS NULL"
+        "SELECT id, target_symbol FROM edges "
+        "WHERE target_node_id IS NULL "
+        "ORDER BY id"
     ).fetchall()
     with transaction_scope(conn, use_savepoints, savepoint_name):
         for edge_id, target_symbol in rows:
@@ -1183,15 +1254,30 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         total_symbols_with_inheritance,
     )
 
+    # P1.4: per-file crash isolation — track failed files so subsequent
+    # passes skip them, and so the run summary reports indexed/failed
+    # counts. Setup steps (DB connection, schema, hash collection) above
+    # are intentionally NOT wrapped — those failures should still abort
+    # the run loudly.
+    failed_paths: set = set()
     for file_path in files_to_parse:
-        update_file_index(
-            conn,
-            file_path,
-            hash_results[file_path],
-            file_to_symbols.get(file_path, []),
-            use_savepoints,
-            next_savepoint("update_file"),
-        )
+        try:
+            update_file_index(
+                conn,
+                file_path,
+                hash_results[file_path],
+                file_to_symbols.get(file_path, []),
+                use_savepoints,
+                next_savepoint("update_file"),
+            )
+        except Exception as exc:
+            log.error(
+                "Failed to index %s during update_file_index: %s: %s",
+                file_path,
+                type(exc).__name__,
+                exc,
+            )
+            failed_paths.add(file_path)
 
     if files_to_parse:
         id_map = resolve_symbol_ids(conn, files_to_parse)
@@ -1203,26 +1289,71 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
             len(name_map),
             len(selector_map),
         )
-        
+
         total_edges = 0
         for file_path in files_to_parse:
-            symbols = file_to_symbols.get(file_path, [])
-            edges = build_edges_for_file(symbols, file_to_imports.get(file_path, []), id_map, name_map, selector_map)
-            total_edges += len(edges)
-            upsert_edges(conn, file_path, edges, use_savepoints, next_savepoint("edges"))
+            if file_path in failed_paths:
+                continue
+            try:
+                symbols = file_to_symbols.get(file_path, [])
+                edges = build_edges_for_file(
+                    symbols,
+                    file_to_imports.get(file_path, []),
+                    id_map,
+                    name_map,
+                    selector_map,
+                )
+                total_edges += len(edges)
+                upsert_edges(
+                    conn, file_path, edges, use_savepoints, next_savepoint("edges")
+                )
+            except Exception as exc:
+                log.error(
+                    "Failed to build/upsert edges for %s: %s: %s",
+                    file_path,
+                    type(exc).__name__,
+                    exc,
+                )
+                failed_paths.add(file_path)
         log.debug("Total edges built = %d", total_edges)
+        # The late passes operate on the global edges/nodes view; they're
+        # not per-file and have no isolation requirement. If they crash,
+        # the run aborts (that's fine — they'd indicate a schema or
+        # connection-level fault, not a per-file content issue).
         rebuild_extension_map(conn, use_savepoints, next_savepoint("extensions"))
         update_unresolved_edges(conn, name_map, use_savepoints, next_savepoint("resolve_edges"))
         rebuild_bridging_edges(conn, use_savepoints, next_savepoint("bridging"))
 
-        all_symbols_to_embed = [symbol for symbols in file_to_symbols.values() for symbol in symbols]
+        # Embedding step is batched across all files; a malformed payload
+        # from any one file would crash the whole batch. Documented as a
+        # known limitation in docs/LIMITATIONS.md (L2). Phase 4 will
+        # introduce per-file embedding isolation.
+        all_symbols_to_embed = [
+            symbol
+            for fp, symbols in file_to_symbols.items()
+            if fp not in failed_paths
+            for symbol in symbols
+        ]
         store_embeddings(conn, all_symbols_to_embed, id_map, use_savepoints, next_savepoint("embeddings"))
 
     if full_reindex:
         conn.commit()
     conn.close()
     elapsed = time.time() - start_time
-    log.info("Indexing complete in %.2fs", elapsed)
+    n_failed = len(failed_paths)
+    # n_indexed counts the number of files attempted that completed
+    # without raising in either update_file_index or build/upsert edges.
+    # Files that fail at parse-worker time are not in `files_to_parse`
+    # via parse_results, so they're already excluded from this count.
+    n_indexed = len(files_to_parse) - n_failed
+    log.info(
+        "Indexing complete in %.2fs: %d files indexed, %d files failed",
+        elapsed,
+        n_indexed,
+        n_failed,
+    )
+    if failed_paths:
+        log.warning("Failed files: %s", sorted(failed_paths))
 
 
 def main() -> None:

@@ -120,15 +120,21 @@ class TestTraceDependencies:
     ):
         """Direct smoke-test of ``server._trace_dependencies`` orientation.
 
-        Targets ``ScientificCalculator.swift`` because it has a clean
-        single-class shape:
+        Targets ``Calculator.swift`` (the root class). Under P1.3's
+        deterministic resolution, name-collision selectors like
+        ``calculate(_:_:operation:)`` resolve to the candidate with the
+        smallest ``(file_path, start_byte)`` — that is, ``Calculator.swift``
+        wins over ``ScientificCalculator.swift``. So both of these
+        cross-file edges land here:
 
           * ScientificCalculator INHERITS Calculator
-              => Calculator must appear in ``upstream``
-                 (something this file depends on).
+              => ScientificCalculator must appear in ``downstream``
+                 (something that depends on this file).
           * Engine.evaluate CALLS calculate
               => Engine.swift must appear in ``downstream``
                  (something that depends on this file).
+          * Calculator has no parent class
+              => no INHERITS edge in ``upstream``.
 
         Catches the regression where someone re-swaps
         ``GRAPH.successors``/``GRAPH.predecessors`` inside the handler:
@@ -145,11 +151,11 @@ class TestTraceDependencies:
         with patch.dict(os.environ, {"GRAPH_DB_PATH": str(indexed_db_path)}):
             server.load_graph(str(indexed_db_path))
 
-            sci_path = (
+            calc_path = (
                 test_fixtures_path
-                / "Sources" / "CalculatorApp" / "ScientificCalculator.swift"
+                / "Sources" / "CalculatorApp" / "Calculator.swift"
             )
-            result = server._trace_dependencies(file_path=str(sci_path))
+            result = server._trace_dependencies(file_path=str(calc_path))
 
         # Shape assertions
         assert "upstream" in result
@@ -157,38 +163,41 @@ class TestTraceDependencies:
         assert "extensions" in result
         assert "error" not in result, f"_trace_dependencies returned error: {result}"
 
-        # Upstream must contain the parent class via INHERITS edge.
-        upstream_inherits = [
-            e for e in result["upstream"]
-            if e.get("edge_type") == "INHERITS" and e.get("symbol") == "Calculator"
+        # Downstream must contain ScientificCalculator (subclass) via INHERITS
+        # — the canonical orientation check. If predecessors/successors get
+        # swapped, this would land in `upstream` instead.
+        downstream_inherits = [
+            e for e in result["downstream"]
+            if e.get("edge_type") == "INHERITS"
+            and e.get("symbol") == "ScientificCalculator"
         ]
-        assert upstream_inherits, (
-            "Calculator (parent class) missing from ScientificCalculator's upstream "
-            f"with edge_type=INHERITS. Got upstream={result['upstream']!r}"
+        assert downstream_inherits, (
+            "ScientificCalculator (subclass) missing from Calculator's "
+            f"downstream with edge_type=INHERITS. "
+            f"Got downstream={result['downstream']!r}"
         )
 
         # Downstream must include at least one entry from Engine.swift,
         # because Engine.evaluate calls calculate (the resolved CALLS edge
-        # points back into ScientificCalculator.swift). The exact symbol
-        # name on the downstream side depends on how the indexer resolves
-        # name-collision overloads (P1.3 territory) — we only assert the
-        # FILE shows up in downstream, which is the orientation-sensitive
-        # piece of information.
+        # under deterministic P1.3 resolution points to Calculator.swift,
+        # the smaller-(file_path, start_byte) candidate among the
+        # `calculate(_:_:operation:)` overloads).
         downstream_files = {e.get("path") for e in result["downstream"]}
         engine_path = str(
             test_fixtures_path / "Sources" / "CalculatorApp" / "Engine.swift"
         )
         assert engine_path in downstream_files, (
-            "Engine.swift missing from downstream of ScientificCalculator.swift. "
+            "Engine.swift missing from downstream of Calculator.swift. "
             f"Got downstream paths: {downstream_files!r}"
         )
 
-        # Negative orientation check: Calculator (the parent) should NOT
-        # appear in downstream — that would mean someone swapped
-        # successors/predecessors back.
-        downstream_symbols = {e.get("symbol") for e in result["downstream"]}
-        assert "Calculator" not in downstream_symbols, (
-            "Calculator appeared in downstream — orientation regression. "
+        # Negative orientation check: ScientificCalculator (the subclass)
+        # should NOT appear in upstream — that would mean someone swapped
+        # successors/predecessors back. Calculator is the root, so its
+        # upstream should not name a same-package class as a parent.
+        upstream_symbols = {e.get("symbol") for e in result["upstream"]}
+        assert "ScientificCalculator" not in upstream_symbols, (
+            "ScientificCalculator appeared in upstream — orientation regression. "
             "This is the classic predecessors/successors swap bug."
         )
 
