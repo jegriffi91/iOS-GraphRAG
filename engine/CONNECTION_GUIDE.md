@@ -268,3 +268,6 @@ Should report the model loaded successfully without any network access. If prefl
 | Stale data after a big refactor | Re-run `ios-graphrag-index` |
 | MPS (Metal) not detected | Reinstall PyTorch per Step 1 |
 | Wrong Python version | Server needs 3.11+. Check: `.venv/bin/python --version` |
+
+For filing bug reports (crashes, recoverable tool errors, general health
+checks), see `docs/REPORTING.md` for the diagnostic-paste workflow.

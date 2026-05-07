@@ -495,11 +495,19 @@ Expose via a new MCP tool, `find_swiftui_views`:
 - Logs warnings, never fails the run.
 - `ios-graphrag-doctor --verify` runs the same checks on demand.
 
-#### Phase 6d — Crash diagnostics (½ day)
+#### Phase 6d — Crash diagnostics (½ day) ✅ landed
 
 - On unhandled exception in server: write a crashdump file with full traceback, environment info (Python version, package versions, GRAPH_DB_PATH, env vars except secrets), and last N tool calls (kept in a ring buffer).
 - Server tool errors include the trace ID so users can grep logs.
 - `docs/REPORTING.md`: bug-report template with `ios-graphrag-doctor --bug-report` output.
+
+**Acceptance:**
+- [x] `src/ios_graphrag/_diagnostics.py` ships a thread-safe deque (default cap 50, override via `GRAPHRAG_RECENT_CALLS_LIMIT`) that the `_traced_handler` decorator records every tool call into (success and error).
+- [x] `install_crashdump_hook()` chains a `sys.excepthook` that writes `<get_log_dir()>/crashdump-<UTC>-<pid>.txt` with traceback, Python/platform, dependency versions, redacted env vars, and the last N tool calls. Failures swallowed; original exception still propagates.
+- [x] Hook installs from `server.main()` after `setup_logging("server")`.
+- [x] `docs/REPORTING.md` (49 lines) documents the three diagnostic paths (crashdump, --tail-errors with trace_id, --bug-report) plus an issue template.
+- [x] `engine/CONNECTION_GUIDE.md` cross-links to the new doc.
+- [x] `tests/test_crash_diagnostics.py` (6 tests) covers ring-buffer cap, thread safety, dump-on-excepthook, home-path redaction, write-error tolerance, and the no-dump-on-handled-error invariant.
 
 #### Phase 6e — CI gates (½ day)
 

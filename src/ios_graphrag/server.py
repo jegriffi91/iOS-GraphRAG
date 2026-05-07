@@ -17,7 +17,7 @@ import numpy as np
 from mcp.server.fastmcp import FastMCP
 from sentence_transformers import SentenceTransformer
 
-from . import _migrations, _tls
+from . import _diagnostics, _migrations, _tls
 
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
@@ -76,7 +76,7 @@ def _traced_handler(*, tool_name: str) -> Callable[[Callable[..., Any]], Callabl
             t0 = time.monotonic()
             try:
                 result = fn(*call_args, **call_kwargs)
-            except Exception:
+            except Exception as exc:
                 duration_ms = round((time.monotonic() - t0) * 1000, 3)
                 log.exception(
                     "tool call error",
@@ -85,6 +85,20 @@ def _traced_handler(*, tool_name: str) -> Callable[[Callable[..., Any]], Callabl
                         "tool": tool_name,
                         "duration_ms": duration_ms,
                     },
+                )
+                # Phase 6d.1: also record this failed call in the ring
+                # buffer so a follow-on excepthook-level crash dump
+                # captures the lead-up. The decorator catches handler
+                # exceptions before they reach excepthook, so this is
+                # the only place the buffer learns about errored tool
+                # invocations.
+                _diagnostics._record_call(
+                    trace_id=trace_id,
+                    tool=tool_name,
+                    tool_args=args_payload,
+                    status="error",
+                    duration_ms=duration_ms,
+                    error=f"{type(exc).__name__}: {exc}",
                 )
                 raise
             duration_ms = round((time.monotonic() - t0) * 1000, 3)
@@ -95,6 +109,17 @@ def _traced_handler(*, tool_name: str) -> Callable[[Callable[..., Any]], Callabl
                     "tool": tool_name,
                     "duration_ms": duration_ms,
                 },
+            )
+            # Phase 6d.1: append the successful call to the bounded ring
+            # buffer used by the crash-diagnostics dump. Buffer is
+            # bounded (default 50, GRAPHRAG_RECENT_CALLS_LIMIT) and
+            # locked, so this stays cheap.
+            _diagnostics._record_call(
+                trace_id=trace_id,
+                tool=tool_name,
+                tool_args=args_payload,
+                status="ok",
+                duration_ms=duration_ms,
             )
             # If the handler returned a dict-shaped result, surface the
             # trace_id back to the caller so an error payload can be
@@ -482,6 +507,12 @@ def main() -> None:
     # support-ticket triage).
     from ._logging import setup_logging
     log_file = setup_logging("server")
+
+    # Phase 6d.2: install the crashdump excepthook AFTER logging is wired
+    # so the post-write log emission lands on the same handler chain as
+    # the rest of the server. Hook is idempotent; safe to call once per
+    # server start.
+    _diagnostics.install_crashdump_hook()
 
     # Order matters: TLS configuration must come AFTER logging is wired so
     # the WARNING emitted by configure_insecure_tls_if_requested() reaches
