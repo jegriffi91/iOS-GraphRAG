@@ -246,6 +246,14 @@ See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and [`.github/workflo
 
 ---
 
+## Operations
+
+- Release notes: [`CHANGELOG.md`](CHANGELOG.md)
+- On-call runbook: [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+- Bug-report flow: [`docs/REPORTING.md`](docs/REPORTING.md)
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE)
