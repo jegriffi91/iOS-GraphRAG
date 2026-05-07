@@ -47,6 +47,7 @@ Thumbs.db
 
 # Test / Mock Data
 mock_repo/
+test_fixtures/**/.build/
 
 # Work-Machine Specific (Do NOT commit production indexer)
 engine/core/indexer_prod.py
