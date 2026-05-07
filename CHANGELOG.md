@@ -6,6 +6,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **SwiftUI 5+ wrapper coverage** — extends `_STATE_KIND_BY_ATTRIBUTE`
+  beyond the Phase 4.5d initial 11-entry map with six wrappers
+  introduced in iOS 15-17: `@FocusState` -> `focusstate`, `@Bindable`
+  -> `bindable`, `@GestureState` -> `gesturestate`, `@ScaledMetric` ->
+  `scaledmetric`, `@Namespace` -> `namespace`, `@AccessibilityFocusState`
+  -> `accessibilityfocusstate`. `find_swiftui_views` now recognizes
+  these state kinds in its filter. `test_fixtures/CalculatorApp`
+  gains an `AdvancedView` struct + paired `@Observable FocusModel`
+  exercising every new wrapper.
+
 ### Performance
 - **Phase 4b** — embedding model now loads in-process and is cached on a
   module-level singleton. Removed `_generate_embeddings_worker` and the

@@ -165,10 +165,12 @@ def test_extracts_state_kind_published(db_connection: sqlite3.Connection) -> Non
 
 
 def test_extracts_body_kind_viewbody(db_connection: sqlite3.Connection) -> None:
-    """Both Views' ``body: some View`` properties get ``body_kind='viewbody'``.
+    """Each View's ``body: some View`` property gets ``body_kind='viewbody'``.
 
-    The fixture has two Views; both declare ``var body: some View`` as
-    a computed property. We expect TWO rows with symbol_name='body' and
+    The fixture has three Views (LoginView + ProfileBadge from the
+    Phase 4.5d patterns, plus AdvancedView from the SwiftUI 5+
+    extension pack); all declare ``var body: some View`` as a computed
+    property. We expect THREE rows with symbol_name='body' and
     body_kind='viewbody'.
     """
     rows = db_connection.execute(
@@ -177,8 +179,8 @@ def test_extracts_body_kind_viewbody(db_connection: sqlite3.Connection) -> None:
         "AND file_path LIKE '%SwiftUIPatterns.swift%' "
         "AND body_kind = 'viewbody'"
     ).fetchall()
-    assert len(rows) == 2, (
-        f"expected 2 'body' viewbody rows (LoginView + ProfileBadge), "
+    assert len(rows) == 3, (
+        f"expected 3 'body' viewbody rows (LoginView + ProfileBadge + AdvancedView), "
         f"got {len(rows)}: {[dict(r) for r in rows]}"
     )
 

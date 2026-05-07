@@ -531,7 +531,9 @@ def _find_swiftui_views(
                 "values mirror the property-wrapper kinds the indexer "
                 "extracts: 'state', 'binding', 'stateobject', 'observedobject', "
                 "'environmentobject', 'environment', 'appstorage', "
-                "'scenestorage', 'fetchrequest', 'query', 'published'."
+                "'scenestorage', 'fetchrequest', 'query', 'published', "
+                "'focusstate', 'bindable', 'gesturestate', 'scaledmetric', "
+                "'namespace', 'accessibilityfocusstate'."
             ),
         ),
     ] = None,

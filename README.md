@@ -90,9 +90,10 @@ the Phase 4.5d extractor) for SwiftUI- and Combine-aware querying:
 - `state_kind` (`TEXT`) — set on properties decorated with a known
   reactivity wrapper. Values: `state`, `binding`, `stateobject`,
   `observedobject`, `environmentobject`, `environment`, `appstorage`,
-  `scenestorage`, `fetchrequest`, `query`, `published`. When multiple
-  wrappers are stacked, the FIRST matching wrapper in source order
-  wins.
+  `scenestorage`, `fetchrequest`, `query`, `published`, `focusstate`,
+  `bindable`, `gesturestate`, `scaledmetric`, `namespace`,
+  `accessibilityfocusstate`. When multiple wrappers are stacked, the
+  FIRST matching wrapper in source order wins.
 - `body_kind` (`TEXT`) — set to `viewbody` on the SwiftUI `body: some View`
   computed property and to `resultbuilder` on `@ViewBuilder` functions
   / computed properties. NULL on regular functions and stored

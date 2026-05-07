@@ -192,6 +192,16 @@ _STATE_KIND_BY_ATTRIBUTE: Dict[str, str] = {
     "FetchRequest": "fetchrequest",
     "Query": "query",
     "Published": "published",
+    # Extension pack: SwiftUI 5+ / iOS 15-17 wrappers introduced after the
+    # original Phase 4.5d map. Same lowercase-no-spaces convention; the
+    # extractor treats them identically (first-match-wins on stacked
+    # wrappers, no special AST handling required).
+    "FocusState": "focusstate",
+    "Bindable": "bindable",
+    "GestureState": "gesturestate",
+    "ScaledMetric": "scaledmetric",
+    "Namespace": "namespace",
+    "AccessibilityFocusState": "accessibilityfocusstate",
 }
 
 # Class-level attribute names that flip ``is_observable``. Property-level

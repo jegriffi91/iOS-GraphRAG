@@ -47,3 +47,28 @@ func makeButtonRow() -> some View {
 class Counter {
     @Published var count: Int = 0
 }
+
+// Extension pack: SwiftUI 5+ / iOS 15-17 wrapper coverage.
+// Exercises @FocusState, @Bindable, @GestureState, @ScaledMetric,
+// @Namespace, @AccessibilityFocusState. Paired with @Observable
+// FocusModel to satisfy the @Bindable contract (bindable requires
+// an @Observable target).
+
+@Observable
+class FocusModel {
+    var preferred: Field = .none
+    enum Field { case none, username, password }
+}
+
+struct AdvancedView: View {
+    @FocusState private var focus: FocusModel.Field?
+    @Bindable var model: FocusModel
+    @GestureState private var dragOffset: CGSize = .zero
+    @ScaledMetric private var iconSize: Double = 32.0
+    @Namespace private var heroNamespace
+    @AccessibilityFocusState private var a11yFocus: Bool
+
+    var body: some View {
+        Text("focus=\(String(describing: focus))")
+    }
+}

@@ -159,10 +159,12 @@ def test_enum_cases_count_in_calculator_app(db_connection: sqlite3.Connection) -
     """The new EnumAndChains.swift fixture contributes exactly 9 enum_case
     rows: 6 from CalculatorOperation plus 3 from LoadingState.
 
-    A separate count check pins the project-wide total at 13 (the 9
-    above plus 4 from ``StateMachine.State`` that the Phase 5 P1
-    extractor now picks up where it previously did not). Both numbers
-    are pinned so accidental fixture changes show up as a test failure
+    A separate count check pins the project-wide total at 16: the 9
+    above, plus 4 from ``StateMachine.State`` that the Phase 5 P1
+    extractor picks up, plus 3 from ``FocusModel.Field`` (the nested
+    enum the SwiftUI 5+ extension pack added to SwiftUIPatterns.swift
+    -- ``none``, ``username``, ``password``). All three numbers are
+    pinned so accidental fixture changes show up as a test failure
     rather than silently shifting downstream assertions.
     """
     fixture_count = db_connection.execute(
@@ -176,7 +178,7 @@ def test_enum_cases_count_in_calculator_app(db_connection: sqlite3.Connection) -
     project_total = db_connection.execute(
         "SELECT COUNT(*) AS cnt FROM nodes WHERE symbol_type = 'enum_case'"
     ).fetchone()["cnt"]
-    assert project_total == 13, (
-        f"expected 13 enum_case rows project-wide (9 from EnumAndChains.swift + "
-        f"4 from StateMachine.State), got {project_total}"
+    assert project_total == 16, (
+        f"expected 16 enum_case rows project-wide (9 from EnumAndChains.swift + "
+        f"4 from StateMachine.State + 3 from FocusModel.Field), got {project_total}"
     )

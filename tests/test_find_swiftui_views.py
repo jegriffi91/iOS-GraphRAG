@@ -38,25 +38,28 @@ def _load_fixture_db(indexed_db_path: Path, monkeypatch):
 
 
 def test_find_swiftui_views_returns_all_views(indexed_db_path: Path) -> None:
-    """No filters -> both LoginView and ProfileBadge appear, with their
-    own state_kinds (NOT the union across the file).
+    """No filters -> LoginView, ProfileBadge, and AdvancedView appear,
+    each with its own state_kinds (NOT the union across the file).
 
     The byte-range scoping in the SQL means LoginView only reports its
     own four wrappers (``state``, ``stateobject``, ``environment``,
-    ``appstorage``), and ProfileBadge only reports its own two
-    (``binding``, ``observedobject``). ProfileBadge does NOT inherit
-    LoginView's wrappers despite sharing a file.
+    ``appstorage``), ProfileBadge only reports its own two
+    (``binding``, ``observedobject``), and AdvancedView only reports
+    the six SwiftUI 5+ wrappers it declares. None of the three Views
+    inherits another View's wrappers despite sharing a file.
     """
     result = server._find_swiftui_views()
-    assert result["count"] == 2, (
-        f"expected 2 Views (LoginView + ProfileBadge), got {result['count']}: {result}"
+    assert result["count"] == 3, (
+        f"expected 3 Views (LoginView + ProfileBadge + AdvancedView), "
+        f"got {result['count']}: {result}"
     )
     classes = {v["swift_class"] for v in result["views"]}
-    assert classes == {"LoginView", "ProfileBadge"}
+    assert classes == {"LoginView", "ProfileBadge", "AdvancedView"}
 
     by_class = {v["swift_class"]: v for v in result["views"]}
     login_states = set(by_class["LoginView"]["states"])
     badge_states = set(by_class["ProfileBadge"]["states"])
+    advanced_states = set(by_class["AdvancedView"]["states"])
     # LoginView declares @StateObject, @State, @Environment, @AppStorage.
     assert login_states == {"stateobject", "state", "environment", "appstorage"}, (
         f"LoginView states wrong: {login_states}"
@@ -65,6 +68,16 @@ def test_find_swiftui_views_returns_all_views(indexed_db_path: Path) -> None:
     assert badge_states == {"observedobject", "binding"}, (
         f"ProfileBadge states wrong: {badge_states}"
     )
+    # AdvancedView declares the six SwiftUI 5+ wrappers covered by the
+    # extension pack.
+    assert advanced_states == {
+        "focusstate",
+        "bindable",
+        "gesturestate",
+        "scaledmetric",
+        "namespace",
+        "accessibilityfocusstate",
+    }, f"AdvancedView states wrong: {advanced_states}"
 
     # trace_id surfaces in the response for log grep-ability.
     assert "trace_id" in result and len(result["trace_id"]) == 8
@@ -87,19 +100,17 @@ def test_find_swiftui_views_observable_only(indexed_db_path: Path) -> None:
     """``observable_only=True`` -> Views in files that contain at least
     one @Observable / @Model class.
 
-    AuthState (@Observable) lives in SwiftUIPatterns.swift alongside
-    LoginView and ProfileBadge, so both views qualify under the
-    file-locality approximation. (A future data-flow analysis could
-    narrow this further by tracing each View's declared property
-    types -- documented as a known limitation.)
+    SwiftUIPatterns.swift now declares two @Observable classes
+    (AuthState and FocusModel from the SwiftUI 5+ extension pack)
+    alongside three Views (LoginView, ProfileBadge, AdvancedView). All
+    three Views qualify under the file-locality approximation. (A
+    future data-flow analysis could narrow this further by tracing each
+    View's declared property types -- documented as a known limitation.)
     """
     result = server._find_swiftui_views(observable_only=True)
     classes = {v["swift_class"] for v in result["views"]}
-    # SwiftUIPatterns.swift has both AuthState (@Observable) and Recipe
-    # is NOT included in the trimmed fixture; only AuthState is. Both
-    # Views should qualify because they share the file with AuthState.
-    assert classes == {"LoginView", "ProfileBadge"}, (
-        f"observable_only should return both Views (file contains @Observable AuthState), "
-        f"got {classes}"
+    assert classes == {"LoginView", "ProfileBadge", "AdvancedView"}, (
+        f"observable_only should return all three Views (file contains "
+        f"@Observable AuthState + FocusModel), got {classes}"
     )
-    assert result["count"] == 2
+    assert result["count"] == 3
