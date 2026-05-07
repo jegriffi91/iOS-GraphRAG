@@ -59,9 +59,9 @@ Trace inheritance, protocol conformance, and extension relationships for a Swift
 |-----------|------|-------------|
 | `file_path` | `string` | Absolute path to the file to analyze |
 
-**Returns:**
-- `upstream`: Classes/protocols this file inherits from or conforms to
-- `downstream`: Classes that inherit from or depend on symbols in this file
+**Returns** (orientation matches LSP's `findReferences` / `prepareCallHierarchy`):
+- `upstream`: Symbols this file depends on — classes/protocols it inherits from or conforms to, and functions it calls
+- `downstream`: Symbols that depend on this file — subclasses, protocol conformers, and callers of its symbols
 - `extensions`: Files that extend types defined in this file
 
 ---
@@ -140,29 +140,29 @@ semantic_search(query="user authentication login session management")
 
 ### 2. Understanding Dependencies
 
-> **Prompt:** "What depends on UserManager.swift?"
+> **Prompt:** "What does Calculator.swift inherit from, and what depends on it?"
 
 The AI will call:
 ```
-trace_dependencies(file_path="/path/to/UserManager.swift")
+trace_dependencies(file_path="/path/to/Calculator.swift")
 ```
 
-**Result:**
+**Result** (Calculator inherits from BaseCalculator; ScientificCalculator and BasicCalculator inherit from Calculator):
 ```json
 {
   "target": {
-    "path": "/path/to/UserManager.swift",
-    "symbols": ["UserManager", "UserManagerDelegate"]
+    "path": "/path/to/Calculator.swift",
+    "symbols": ["Calculator"]
   },
   "upstream": [
-    {"path": "/path/to/AuthService.swift", "symbol": "AuthService", "edge_type": "CALLS"}
+    {"path": "/path/to/BaseCalculator.swift", "symbol": "BaseCalculator", "edge_type": "INHERITS"}
   ],
   "downstream": [
-    {"path": "/path/to/User.swift", "symbol": "User", "edge_type": "IMPORTS"}
+    {"path": "/path/to/ScientificCalculator.swift", "symbol": "ScientificCalculator", "edge_type": "INHERITS"},
+    {"path": "/path/to/BasicCalculator.swift", "symbol": "BasicCalculator", "edge_type": "INHERITS"}
   ],
   "extensions": [
-    "/path/to/UserManager+Networking.swift",
-    "/path/to/UserManager+Persistence.swift"
+    "/path/to/Calculator+Memory.swift"
   ]
 }
 ```

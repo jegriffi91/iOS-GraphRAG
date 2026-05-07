@@ -43,6 +43,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 
+# Module-level logger. Levels and additional handlers (stderr) are configured
+# in main(); when imported as a library the existing WARNING+ file logging
+# above is preserved so log_error() still flushes to indexing_errors.log.
+log = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class SymbolKey:
@@ -1124,7 +1129,12 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         for s in symbols 
         if s.inherits or s.conforms or s.extends
     )
-    print(f"DEBUG: files_to_parse={len(files_to_parse)}, parse_results={len(parse_results)}, symbols_with_inheritance={total_symbols_with_inheritance}")
+    log.debug(
+        "files_to_parse=%d, parse_results=%d, symbols_with_inheritance=%d",
+        len(files_to_parse),
+        len(parse_results),
+        total_symbols_with_inheritance,
+    )
 
     for file_path in files_to_parse:
         update_file_index(
@@ -1140,7 +1150,12 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         id_map = resolve_symbol_ids(conn, files_to_parse)
         name_map = resolve_all_symbol_ids(conn)
         selector_map = resolve_selector_ids(conn)  # For selector-based CALLS resolution
-        print(f"DEBUG: id_map size={len(id_map)}, name_map size={len(name_map)}, selector_map size={len(selector_map)}")
+        log.debug(
+            "id_map size=%d, name_map size=%d, selector_map size=%d",
+            len(id_map),
+            len(name_map),
+            len(selector_map),
+        )
         
         total_edges = 0
         for file_path in files_to_parse:
@@ -1148,7 +1163,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
             edges = build_edges_for_file(symbols, file_to_imports.get(file_path, []), id_map, name_map, selector_map)
             total_edges += len(edges)
             upsert_edges(conn, file_path, edges, use_savepoints, next_savepoint("edges"))
-        print(f"DEBUG: Total edges built = {total_edges}")
+        log.debug("Total edges built = %d", total_edges)
         rebuild_extension_map(conn, use_savepoints, next_savepoint("extensions"))
         update_unresolved_edges(conn, name_map, use_savepoints, next_savepoint("resolve_edges"))
         rebuild_bridging_edges(conn, use_savepoints, next_savepoint("bridging"))
@@ -1160,7 +1175,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         conn.commit()
     conn.close()
     elapsed = time.time() - start_time
-    print(f"✅ Indexing complete in {elapsed:.2f}s")
+    log.info("Indexing complete in %.2fs", elapsed)
 
 
 def main() -> None:
@@ -1169,6 +1184,41 @@ def main() -> None:
     parser.add_argument("--db", default=DB_DEFAULT, help="SQLite database path")
     parser.add_argument("--full", action="store_true", help="Force full re-index")
     args = parser.parse_args()
+
+    # Reconfigure logging for CLI usage:
+    #   - INFO level by default (set GRAPHRAG_LOG_LEVEL=DEBUG for the verbose
+    #     trace messages that previously went to stdout via print()).
+    #   - Stream to stderr so stdout stays clean (defensive: if the indexer is
+    #     ever invoked from the MCP server stdio context, leaking to stdout
+    #     would corrupt the protocol stream).
+    #   - Append to indexing_errors.log (replacing the module-level WARNING
+    #     handler installed at import time so we don't double-log every line).
+    import sys as _sys
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    level = getattr(logging, os.environ.get("GRAPHRAG_LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+    root = logging.getLogger()
+    # Detach any handlers installed at module import so we don't double-emit
+    # (the module-level basicConfig adds one FileHandler with a different
+    # format; we replace it with our own to keep output consistent).
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    root.setLevel(level)
+
+    stderr_handler = logging.StreamHandler(_sys.stderr)
+    stderr_handler.setFormatter(fmt)
+    stderr_handler.setLevel(level)
+    root.addHandler(stderr_handler)
+
+    file_handler = logging.FileHandler(LOG_PATH)  # opens append mode by default
+    file_handler.setFormatter(fmt)
+    file_handler.setLevel(level)
+    root.addHandler(file_handler)
 
     index_repository(args.repo, args.db, args.full)
 

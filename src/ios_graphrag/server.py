@@ -99,7 +99,8 @@ def ensure_model() -> SentenceTransformer:
     description=(
         "ARCHITECTURE EXPLORER: Find usages, inheritance, protocols, and extensions via a pre-built GraphRAG. "
         "NEVER USE grep or find to trace relationships. Bash is blind to cross-file ASTs, misses implicit bridging, and hallucinates connections. "
-        "Instantly returns 100% accurate, structured JSON of upstream parents and downstream dependents."
+        "Returns structured JSON with: 'upstream' = symbols this file depends on (its parents/protocols/callees), "
+        "'downstream' = symbols that depend on this file (its subclasses/conformers/callers), and 'extensions'."
     ),
 )
 def _trace_dependencies(
@@ -119,22 +120,30 @@ def _trace_dependencies(
         "extensions": [],
     }
 
+    # Edge convention in this codebase: source = subject, target = thing it depends on.
+    # E.g. for `class ScientificCalculator: Calculator`, the edge is
+    # source=ScientificCalculator -> target=Calculator (type=INHERITS).
+    # Therefore:
+    #   GRAPH.successors(node)   = nodes this node depends on  -> upstream
+    #   GRAPH.predecessors(node) = nodes that depend on this   -> downstream
+    # This matches LSP's findReferences/prepareCallHierarchy convention:
+    # "upstream" = dependencies, "downstream" = dependents.
     for node in nodes:
-        for pred in GRAPH.predecessors(node):
-            edge_data = GRAPH.edges[pred, node]
-            result["upstream"].append(
-                {
-                    "path": GRAPH.nodes[pred].get("path"),
-                    "symbol": GRAPH.nodes[pred].get("name"),
-                    "edge_type": edge_data.get("type"),
-                }
-            )
         for succ in GRAPH.successors(node):
             edge_data = GRAPH.edges[node, succ]
-            result["downstream"].append(
+            result["upstream"].append(
                 {
                     "path": GRAPH.nodes[succ].get("path"),
                     "symbol": GRAPH.nodes[succ].get("name"),
+                    "edge_type": edge_data.get("type"),
+                }
+            )
+        for pred in GRAPH.predecessors(node):
+            edge_data = GRAPH.edges[pred, node]
+            result["downstream"].append(
+                {
+                    "path": GRAPH.nodes[pred].get("path"),
+                    "symbol": GRAPH.nodes[pred].get("name"),
                     "edge_type": edge_data.get("type"),
                 }
             )

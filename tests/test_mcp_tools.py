@@ -15,15 +15,25 @@ import pytest
 
 
 class TestTraceDependencies:
-    """Tests for the trace_dependencies MCP tool."""
-    
+    """Tests for the trace_dependencies MCP tool.
+
+    Semantic convention (matches LSP findReferences / prepareCallHierarchy):
+    - upstream   = symbols this file depends on (parents, protocols, callees)
+    - downstream = symbols that depend on this file (subclasses, conformers, callers)
+
+    Edge convention in the indexer: source = subject, target = thing it depends on.
+    For `class ScientificCalculator: Calculator` -> edge source=ScientificCalculator,
+    target=Calculator, type=INHERITS. Therefore Calculator is upstream of
+    ScientificCalculator, and ScientificCalculator is downstream of Calculator.
+    """
+
     def test_trace_scientific_calculator_upstream(
         self, db_connection: sqlite3.Connection, test_fixtures_path: Path
     ):
         """
-        Verify trace_dependencies shows Calculator as upstream of ScientificCalculator.
-        
-        This tests the MCP tool logic indirectly by querying the underlying data.
+        ScientificCalculator inherits from Calculator. Under the new semantics
+        (upstream = "what I depend on"), Calculator must appear in
+        ScientificCalculator's upstream list.
         """
         # Find ScientificCalculator file path
         row = db_connection.execute(
@@ -31,31 +41,36 @@ class TestTraceDependencies:
         ).fetchone()
         assert row is not None
         file_path = row["file_path"]
-        
+
         # Get all nodes in that file
         nodes = db_connection.execute(
             "SELECT id, symbol_name FROM nodes WHERE file_path = ?",
             (file_path,)
         ).fetchall()
         node_ids = [n["id"] for n in nodes]
-        
-        # Check for INHERITS edge pointing outward (upstream)
-        if node_ids:
-            placeholders = ",".join("?" for _ in node_ids)
-            edge = db_connection.execute(f"""
-                SELECT e.target_symbol FROM edges e
-                WHERE e.source_node_id IN ({placeholders})
-                AND e.edge_type = 'INHERITS'
-            """, node_ids).fetchone()
-            
-            assert edge is not None, "No INHERITS edge from ScientificCalculator"
-            assert edge["target_symbol"] == "Calculator"
-    
+
+        # New semantics: upstream of ScientificCalculator = outbound INHERITS edges
+        # i.e. edges where source_node_id is a node in ScientificCalculator.swift
+        # and target_symbol points to its parent.
+        assert node_ids, "ScientificCalculator file has no nodes"
+        placeholders = ",".join("?" for _ in node_ids)
+        edge = db_connection.execute(f"""
+            SELECT e.target_symbol FROM edges e
+            WHERE e.source_node_id IN ({placeholders})
+            AND e.edge_type = 'INHERITS'
+        """, node_ids).fetchone()
+
+        assert edge is not None, "No INHERITS edge from ScientificCalculator"
+        # Calculator is what ScientificCalculator depends on => upstream.
+        assert edge["target_symbol"] == "Calculator"
+
     def test_trace_operation_downstream(
         self, db_connection: sqlite3.Connection, test_fixtures_path: Path
     ):
         """
-        Verify trace_dependencies shows conformers as downstream of Operation protocol.
+        Operation is a protocol conformed to by Addition/Subtraction/Multiplication/
+        Division. Under the new semantics (downstream = "what depends on me"),
+        those conformers must appear in Operation's downstream list.
         """
         # Find Operation node
         row = db_connection.execute(
@@ -63,20 +78,32 @@ class TestTraceDependencies:
         ).fetchone()
         assert row is not None
         operation_id = row["id"]
-        
-        # Find edges where Operation is the target (downstream = things that point TO it)
+
+        # New semantics: downstream of Operation = inbound CONFORMS edges
+        # i.e. edges where target_node_id == Operation.id (things that depend on it).
         edges = db_connection.execute("""
             SELECT src.symbol_name FROM edges e
             JOIN nodes src ON e.source_node_id = src.id
             WHERE e.target_node_id = ?
             AND e.edge_type = 'CONFORMS'
         """, (operation_id,)).fetchall()
-        
+
         conformers = [e["symbol_name"] for e in edges]
         expected = ["Addition", "Subtraction", "Multiplication", "Division"]
-        
+
         for expected_conformer in expected:
             assert expected_conformer in conformers, f"Missing conformer: {expected_conformer}"
+
+    # NOTE: the two tests above query the underlying SQL `edges` table directly
+    # rather than invoking `_trace_dependencies`. Because the indexer's edge
+    # convention (source = subject, target = thing it depends on) is unchanged
+    # by this commit, these assertions hold under both the OLD orientation
+    # (where the server placed predecessors into `upstream`) and the NEW
+    # orientation (successors into `upstream`). They were correctly named and
+    # asserted under the new semantics; under the old code the test names were
+    # misleading rather than wrong. The end-to-end orientation of
+    # `_trace_dependencies` is exercised manually during verification (see
+    # docs/PRODUCTION_ROADMAP.md P1.1 acceptance criteria).
 
 
 class TestEmbeddings:
