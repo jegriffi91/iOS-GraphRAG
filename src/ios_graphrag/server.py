@@ -300,6 +300,11 @@ def main() -> None:
 
         load_graph(db_path)
         log.info("Graph loaded. Starting MCP stdio server...")
+        # Phase 4a benchmark hook: emit a unique, machine-parseable token on
+        # the line just before mcp.run() blocks on stdio. The harness in
+        # benchmarks/run.py spawns the server as a subprocess and watches
+        # stderr for this token to record cold-start latency.
+        log.info("ios-graphrag-server READY")
         mcp.run()
     except Exception:
         log.error("Unhandled exception during server startup:\n" + traceback.format_exc())

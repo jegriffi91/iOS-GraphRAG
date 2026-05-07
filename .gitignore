@@ -49,6 +49,9 @@ Thumbs.db
 mock_repo/
 test_fixtures/**/.build/
 
+# Benchmark output (per-machine, per-run; commit specific results manually)
+benchmarks/results/*.json
+
 # Work-Machine Specific (Do NOT commit production indexer)
 engine/core/indexer_prod.py
 engine/core/server_prod.py

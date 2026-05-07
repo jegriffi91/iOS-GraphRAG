@@ -1263,6 +1263,11 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         savepoint_counter += 1
         return f"{prefix}_{savepoint_counter}"
 
+    # Phase boundary markers (DEBUG-level so they're invisible in INFO output
+    # but the benchmark harness can scrape them by setting GRAPHRAG_LOG_LEVEL=DEBUG
+    # and parsing log lines that match "PHASE_START <name>" / "PHASE_END <name>".
+    # Markers are intentionally simple substrings, not structured records.
+    log.debug("PHASE_START hash")
     hash_results: Dict[str, str] = {}
     with ProcessPoolExecutor(max_workers=os.cpu_count() or 1) as executor:
         futures = {executor.submit(compute_hash, f): f for f in files}
@@ -1275,6 +1280,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
                 continue
             if file_hash:
                 hash_results[path] = file_hash
+    log.debug("PHASE_END hash")
 
     disk_paths = set(hash_results.keys())
     stored_paths = set(stored_hashes.keys())
@@ -1302,6 +1308,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
     files_to_parse = sorted(new_paths | changed_paths)
     parse_results: List[ParseResult] = []
     if files_to_parse:
+        log.debug("PHASE_START parse")
         with ProcessPoolExecutor(max_workers=os.cpu_count() or 1) as executor:
             futures = {executor.submit(parse_file, path): path for path in files_to_parse}
             for future in as_completed(futures):
@@ -1312,6 +1319,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
                     log_error(path, f"Parse worker failure: {exc}")
                     continue
                 parse_results.append(result)
+        log.debug("PHASE_END parse")
 
     file_to_symbols: Dict[str, List[Symbol]] = {res.file_path: res.symbols for res in parse_results}
     file_to_imports: Dict[str, List[str]] = {res.file_path: res.imports for res in parse_results}
@@ -1335,6 +1343,8 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
     # are intentionally NOT wrapped — those failures should still abort
     # the run loudly.
     failed_paths: set = set()
+    if files_to_parse:
+        log.debug("PHASE_START sql_write")
     for file_path in files_to_parse:
         try:
             update_file_index(
@@ -1353,8 +1363,11 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
                 exc,
             )
             failed_paths.add(file_path)
+    if files_to_parse:
+        log.debug("PHASE_END sql_write")
 
     if files_to_parse:
+        log.debug("PHASE_START weave")
         id_map = resolve_symbol_ids(conn, files_to_parse)
         name_map = resolve_all_symbol_ids(conn)
         selector_map = resolve_selector_ids(conn)  # For selector-based CALLS resolution
@@ -1398,11 +1411,13 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
         rebuild_extension_map(conn, use_savepoints, next_savepoint("extensions"))
         update_unresolved_edges(conn, name_map, use_savepoints, next_savepoint("resolve_edges"))
         rebuild_bridging_edges(conn, use_savepoints, next_savepoint("bridging"))
+        log.debug("PHASE_END weave")
 
         # Embedding step is batched across all files; a malformed payload
         # from any one file would crash the whole batch. Documented as a
         # known limitation in docs/LIMITATIONS.md (L2). Phase 4 will
         # introduce per-file embedding isolation.
+        log.debug("PHASE_START embed")
         all_symbols_to_embed = [
             symbol
             for fp, symbols in file_to_symbols.items()
@@ -1410,6 +1425,7 @@ def index_repository(repo_root: str, db_path: str, full_reindex: bool = False) -
             for symbol in symbols
         ]
         store_embeddings(conn, all_symbols_to_embed, id_map, use_savepoints, next_savepoint("embeddings"))
+        log.debug("PHASE_END embed")
 
     if full_reindex:
         conn.commit()
