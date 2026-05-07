@@ -7,6 +7,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Nightly regression check** — `benchmarks/baseline/{full_index,parse_audit}.json`
+  pin a fixture-bound reference run from `benchmarks/run.py` and
+  `tools/parse_audit.py` against `test_fixtures/CalculatorApp`.
+  `benchmarks/check_regression.py` compares fresh nightly runs against
+  the baseline and fails CI on a > 25 % wall-time regression, > 35 %
+  `semantic_search` p99 regression, or any increase in parse-error rate.
+  The nightly workflow now runs both harnesses and pipes their outputs
+  through the regression check; absolute fixture numbers are noisy so
+  tolerances are looser than the roadmap's 1M-LOC spec.
 - **SwiftUI 5+ wrapper coverage** — extends `_STATE_KIND_BY_ATTRIBUTE`
   beyond the Phase 4.5d initial 11-entry map with six wrappers
   introduced in iOS 15-17: `@FocusState` -> `focusstate`, `@Bindable`

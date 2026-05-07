@@ -1,0 +1,70 @@
+{
+  "full_index": {
+    "db_size_bytes": 815104,
+    "edge_count": 86,
+    "peak_rss_bytes": 1632698368,
+    "phases": {
+      "embed_seconds": 5.516,
+      "hash_seconds": 4.842,
+      "parse_seconds": 4.701,
+      "sql_write_seconds": 0.008,
+      "weave_seconds": 0.006
+    },
+    "symbol_count": 165,
+    "wall_seconds": 17.67063062498346
+  },
+  "incremental": {
+    "1000_files": {
+      "reason": "insufficient git history for 1000-file delta",
+      "skipped": true
+    },
+    "100_files": {
+      "reason": "insufficient git history for 100-file delta",
+      "skipped": true
+    },
+    "10_files": {
+      "reason": "insufficient git history for 10-file delta",
+      "skipped": true
+    }
+  },
+  "memory": {
+    "embedding_matrix_bytes": 506880,
+    "graph_edges": 43,
+    "graph_nodes": 165
+  },
+  "metadata": {
+    "git_sha": "83cb6cf",
+    "loc": 591,
+    "platform": {
+      "machine": "arm64",
+      "system": "Darwin"
+    },
+    "python_version": "3.14.3",
+    "repo_git_sha": "83cb6cf",
+    "repo_path": "/Users/jamesgriffin/dev/iOS-GraphRAG/.claude/worktrees/admiring-kirch-b49458/test_fixtures/CalculatorApp",
+    "timestamp": "2026-05-07T21:06:13Z",
+    "torch_version": "2.11.0"
+  },
+  "semantic_search_latency_ms": {
+    "max": 203.48412496969104,
+    "mean": 9.236494945644429,
+    "min": 7.111624930985272,
+    "n": 165,
+    "p50": 7.534499978646636,
+    "p95": 8.616966800764203,
+    "p99": 21.642436445690677
+  },
+  "server_cold_start": {
+    "spawn_to_first_result_seconds": 2.3408042080700397,
+    "spawn_to_ready_seconds": 2.3408042080700397
+  },
+  "trace_dependencies_latency_ms": {
+    "max": 1.2809589970856905,
+    "mean": 0.7569615014030465,
+    "min": 0.6952090188860893,
+    "n": 14,
+    "p50": 0.7105414988473058,
+    "p95": 0.9579090343322603,
+    "p99": 1.216349004535004
+  }
+}

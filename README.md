@@ -319,7 +319,7 @@ Optimized for **Apple Silicon (M-series)**:
 
 On every PR, CI runs ruff lint + format check, pytest on macOS Python 3.11/3.12, and `ios-graphrag-preflight --smoke` (offline checks only — the full preflight pulls a ~500MB embedding model and is meant for a fresh local machine, not CI).
 
-A nightly workflow runs the benchmark harness against the bundled `test_fixtures/CalculatorApp` fixture and uploads the JSON as a build artifact (90-day retention).
+A nightly workflow runs the benchmark harness against the bundled `test_fixtures/CalculatorApp` fixture and uploads the JSON as a build artifact (90-day retention). Nightly CI compares against `benchmarks/baseline/` and fails the run on a wall-time, semantic-search-p99, or parse-error regression past the tolerances in `benchmarks/check_regression.py`.
 
 See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and [`.github/workflows/nightly-benchmark.yml`](.github/workflows/nightly-benchmark.yml) for the full workflow definitions.
 

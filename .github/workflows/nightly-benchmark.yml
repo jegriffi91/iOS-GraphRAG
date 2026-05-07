@@ -1,16 +1,15 @@
 # Nightly benchmark for iOS-GraphRAG.
 #
-# Runs benchmarks/run.py on the checked-in CalculatorApp test fixture and
-# uploads the resulting JSON as a build artifact (90-day retention).
+# Runs benchmarks/run.py and tools/parse_audit.py on the checked-in
+# CalculatorApp test fixture, compares the fresh outputs against the
+# committed baseline at benchmarks/baseline/, and uploads both fresh
+# JSONs as build artifacts (90-day retention).
 # Schedule: 11:00 UTC daily (~04:00 US Pacific, late-evening for EU teams).
 #
-# NOTE: the spec calls for a >10% regression check on full reindex and a
-# >20% regression on semantic_search p99 — that requires a baseline JSON
-# that hasn't been established yet. Phase 4a is owner-empirical and the
-# real baseline is collected on the project owner's hardware against a
-# real iOS repo, not the tiny CalculatorApp fixture. Until that lands,
-# this workflow only collects + archives nightly numbers; a follow-up
-# commit can drop in `benchmarks/baseline.json` plus a comparison step.
+# Baseline rationale and tolerances live in benchmarks/baseline/README.md
+# and benchmarks/check_regression.py docstrings respectively. tl;dr: the
+# fixture is too small for absolute numbers to mean much, but RATIOS
+# against the baseline catch egregious pipeline-level regressions.
 name: Nightly Benchmark
 
 on:
@@ -39,7 +38,24 @@ jobs:
             --repo test_fixtures/CalculatorApp \
             --output benchmarks/results/
 
+      - name: Run parse audit
+        run: |
+          uv run python tools/parse_audit.py \
+            --repo test_fixtures/CalculatorApp \
+            --output benchmarks/results/
+
+      - name: Regression check (vs committed baseline)
+        run: |
+          BENCH_CURRENT=$(ls -t benchmarks/results/*-*.json | grep -v parse-audit | head -1)
+          AUDIT_CURRENT=$(ls -t benchmarks/results/parse-audit-*.json | head -1)
+          uv run python benchmarks/check_regression.py \
+            --benchmark-baseline benchmarks/baseline/full_index.json \
+            --benchmark-current "$BENCH_CURRENT" \
+            --audit-baseline benchmarks/baseline/parse_audit.json \
+            --audit-current "$AUDIT_CURRENT"
+
       - name: Upload result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-${{ github.sha }}-${{ github.run_id }}
