@@ -43,6 +43,12 @@ MODEL = None
 EMBEDDING_MATRIX = None   # np.ndarray [N, dim], L2-normalized
 EMBEDDING_IDS = []         # List[(id, path, name)] matching matrix rows
 
+# Phase 4f.2: track DB mtime so each tool call can cheaply check whether the
+# indexer has rewritten the database underneath us. ``_LOADED_MTIME`` is
+# refreshed inside ``load_graph``; ``_reload_if_stale`` is called by every
+# MCP tool handler before it touches the in-memory graph.
+_LOADED_MTIME: float = 0.0
+
 
 def _check_schema_version_or_exit(db_path: str) -> None:
     """Verify the DB schema matches what this build expects.
@@ -86,7 +92,15 @@ def _check_schema_version_or_exit(db_path: str) -> None:
 
 
 def load_graph(db_path: str) -> None:
-    global EMBEDDING_MATRIX, EMBEDDING_IDS
+    global EMBEDDING_MATRIX, EMBEDDING_IDS, _LOADED_MTIME
+    # Phase 4f.2: a reload completely replaces the in-memory graph; clear
+    # any prior state first so stale nodes/edges from a previous load
+    # don't survive into the new view.
+    GRAPH.clear()
+    NODE_META.clear()
+    EMBEDDING_MATRIX = None
+    EMBEDDING_IDS = []
+
     conn = sqlite3.connect(db_path)
     for row in conn.execute("SELECT id, file_path, symbol_name, symbol_type FROM nodes"):
         node_id, path, name, symbol_type = row
@@ -112,6 +126,46 @@ def load_graph(db_path: str) -> None:
         EMBEDDING_IDS = [(r[0], r[1], r[2]) for r in emb_rows]
 
     conn.close()
+
+    # Phase 4f.2: snapshot the mtime _after_ we've finished reading. If the
+    # indexer rewrites the DB during this load (rare but possible on a busy
+    # box), the next ``_reload_if_stale`` call will see the newer mtime and
+    # reload again.
+    try:
+        _LOADED_MTIME = os.path.getmtime(db_path)
+    except OSError:
+        _LOADED_MTIME = 0.0
+
+
+def _reload_if_stale() -> None:
+    """Reload ``GRAPH`` + ``EMBEDDING_MATRIX`` if the DB file has been
+    rewritten since we last loaded it.
+
+    Phase 4f.2 cache-drift fix: a long-lived MCP server process can serve
+    stale graph data after the indexer rewrites the SQLite DB. Comparing
+    mtime is one ``stat(2)`` syscall per tool call — cheaper than the
+    alternative of a fully manual restart and far cheaper than waiting on
+    a content hash. On the indexer's rebuild path the file's mtime always
+    advances (SQLite truncates/writes on commit), so this is safe.
+    """
+    global _LOADED_MTIME
+    db_path = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
+    try:
+        current = os.path.getmtime(db_path)
+    except OSError:
+        # DB went missing; let downstream code surface the real error.
+        return
+    if current > _LOADED_MTIME:
+        log.info(
+            "Database mtime changed (%s -> %s); reloading",
+            _LOADED_MTIME,
+            current,
+        )
+        load_graph(db_path)
+        # ``load_graph`` updates ``_LOADED_MTIME`` itself, but mirror it
+        # here so the local ``current`` value is authoritative even on
+        # very fast successive writes.
+        _LOADED_MTIME = current
 
 
 def ensure_model() -> SentenceTransformer:
@@ -140,6 +194,7 @@ def ensure_model() -> SentenceTransformer:
 def _trace_dependencies(
     file_path: Annotated[str, Field(description="Absolute path to the Swift/ObjC file. Use paths from global_codebase_search results.")],
 ) -> dict:
+    _reload_if_stale()
     nodes = [n for n, data in GRAPH.nodes(data=True) if data.get("path") == file_path]
     if not nodes:
         return {"error": f"File not found in index: {file_path}"}
@@ -207,21 +262,41 @@ def _trace_dependencies(
     ),
 )
 def _find_bridging_header_usage() -> dict:
-    bridging_edges = [
-        (u, v, d)
-        for u, v, d in GRAPH.edges(data=True)
-        if d.get("type") == "BRIDGING"
-    ]
+    _reload_if_stale()
+    # Phase 4f.1: push the BRIDGING filter into SQL. Walking GRAPH.edges is
+    # O(E) on every call — fine for the test fixture's tens of edges, but
+    # the production roadmap pegs this at >1M edges where the in-memory
+    # scan dominated. The SQL form uses ``idx_edges_type`` (declared in
+    # engine/database/schema.sql) so the filter is index-backed and only
+    # fans out to the joined ``nodes`` rows we actually return.
+    db_path = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT src.symbol_name AS swift_class,
+                   src.file_path   AS swift_file,
+                   tgt.symbol_name AS objc_parent,
+                   tgt.file_path   AS objc_file
+            FROM edges e
+            JOIN nodes src ON src.id = e.source_node_id
+            JOIN nodes tgt ON tgt.id = e.target_node_id
+            WHERE e.edge_type = 'BRIDGING'
+            ORDER BY src.file_path, src.line_number
+            """
+        ).fetchall()
+    finally:
+        conn.close()
     return {
-        "count": len(bridging_edges),
+        "count": len(rows),
         "bridging_classes": [
             {
-                "swift_class": GRAPH.nodes[u].get("name"),
-                "swift_file": GRAPH.nodes[u].get("path"),
-                "objc_parent": GRAPH.nodes[v].get("name"),
-                "objc_file": GRAPH.nodes[v].get("path"),
+                "swift_class": row[0],
+                "swift_file": row[1],
+                "objc_parent": row[2],
+                "objc_file": row[3],
             }
-            for u, v, _ in bridging_edges
+            for row in rows
         ],
     }
 
@@ -239,6 +314,7 @@ def _read_symbol(
     start_byte: Annotated[int, Field(description="Start byte offset from global_codebase_search results. Do not guess.", ge=0)],
     end_byte: Annotated[int, Field(description="End byte offset from global_codebase_search results. Do not guess.", ge=0)],
 ) -> dict:
+    _reload_if_stale()
     try:
         with open(file_path, "rb") as handle:
             handle.seek(start_byte)
@@ -271,6 +347,7 @@ def _semantic_search(
     query: Annotated[str, Field(description="Natural language concept or exact class/function name. Do not pass regex, glob patterns, or raw bash syntax.")],
     top_k: Annotated[int, Field(description="Number of results to return.", ge=1, le=50)] = 10,
 ) -> dict:
+    _reload_if_stale()
     if EMBEDDING_MATRIX is None or len(EMBEDDING_IDS) == 0:
         return {"query": query, "results": [], "error": "No embeddings loaded. Re-index with indexer.py."}
 
@@ -280,7 +357,13 @@ def _semantic_search(
 
     # Vectorized cosine similarity: O(1) matrix multiply
     scores = np.dot(EMBEDDING_MATRIX, q_vec)
-    top_indices = np.argsort(scores)[-top_k:][::-1]
+    # Phase 4d.1: ``argpartition`` is O(N) and gives us the top-k unsorted;
+    # a follow-up O(k log k) sort over just the k winners orders them.
+    # Total: O(N + k log k) vs the previous ``argsort``'s O(N log N).
+    # ``argpartition`` raises if k > N, hence the ``min`` guard.
+    k = min(top_k, scores.shape[0])
+    unsorted_top = np.argpartition(scores, -k)[-k:]
+    top_indices = unsorted_top[np.argsort(scores[unsorted_top])[::-1]]
 
     return {
         "query": query,
