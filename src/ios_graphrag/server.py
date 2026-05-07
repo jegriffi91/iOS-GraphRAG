@@ -1,11 +1,14 @@
 import argparse
+import functools
 import os
 import sys
 import sqlite3
 import logging
+import time
 import traceback
+import uuid
 from pathlib import Path
-from typing import Annotated, Dict, List
+from typing import Annotated, Any, Callable, Dict, List
 
 from pydantic import Field
 
@@ -19,21 +22,90 @@ from . import _migrations, _tls
 DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 
-# --- STARTUP LOGGING ---
-# Writes to a log file alongside the DB so startup crashes are diagnosable.
-# Critical for enterprise/work-PC setups where Copilot CLI gives no useful
-# error output when an MCP server crashes during the stdio handshake.
-_db_path_for_log = os.getenv("GRAPH_DB_PATH", DB_DEFAULT)
-_log_path = str(Path(_db_path_for_log).parent / "server.log")
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(_log_path),
-        logging.StreamHandler(sys.stderr),
-    ],
-)
+# Phase 6b: log handlers are configured in ``main()`` via
+# :func:`_logging.setup_logging`. Tests and other importers see a default
+# logger; the file/stderr handlers attach when the CLI entry point runs.
 log = logging.getLogger(__name__)
+
+
+def _traced_handler(*, tool_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Wrap an MCP tool handler with per-call trace IDs.
+
+    Every invocation gets a fresh 8-char UUID4 prefix (8 chars is plenty for
+    grep / jq filtering without bloating log lines). Lifecycle:
+
+      1. Entry: ``log.info("tool call begin", extra={trace_id, tool, args})``.
+      2. Body runs.
+      3a. Success: ``log.info("tool call end", extra={trace_id, duration_ms})``.
+          If the result is a dict, ``trace_id`` is also injected so callers
+          can grep logs from the response payload.
+      3b. Error: ``log.exception(...)`` with ``trace_id`` and ``duration_ms``
+          attached, then re-raise. The trace_id is included in the error
+          payload (when the handler returns a dict with an ``error`` key) or
+          the re-raised exception's ``args``.
+
+    Decorated functions keep their signature — :mod:`mcp.server.fastmcp`
+    introspects the wrapped function via :func:`functools.wraps` for tool
+    schema generation.
+    """
+
+    def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)
+        def wrapper(*call_args: Any, **call_kwargs: Any) -> Any:
+            trace_id = uuid.uuid4().hex[:8]
+            # ``call_args`` are positional; FastMCP always invokes via
+            # kwargs for typed parameters, so ``args_payload`` should
+            # normally capture the full call. We log positional args
+            # defensively in case a future call site bypasses kwargs.
+            #
+            # Field name note: ``args`` is reserved on
+            # :class:`logging.LogRecord` (it's the format-string args
+            # tuple), so we surface the call inputs as ``tool_args`` to
+            # avoid the ``Attempt to overwrite 'args'`` KeyError.
+            args_payload: Dict[str, Any] = dict(call_kwargs)
+            if call_args:
+                args_payload["_positional"] = list(call_args)
+            log.info(
+                "tool call begin",
+                extra={
+                    "trace_id": trace_id,
+                    "tool": tool_name,
+                    "tool_args": args_payload,
+                },
+            )
+            t0 = time.monotonic()
+            try:
+                result = fn(*call_args, **call_kwargs)
+            except Exception:
+                duration_ms = round((time.monotonic() - t0) * 1000, 3)
+                log.exception(
+                    "tool call error",
+                    extra={
+                        "trace_id": trace_id,
+                        "tool": tool_name,
+                        "duration_ms": duration_ms,
+                    },
+                )
+                raise
+            duration_ms = round((time.monotonic() - t0) * 1000, 3)
+            log.info(
+                "tool call end",
+                extra={
+                    "trace_id": trace_id,
+                    "tool": tool_name,
+                    "duration_ms": duration_ms,
+                },
+            )
+            # If the handler returned a dict-shaped result, surface the
+            # trace_id back to the caller so an error payload can be
+            # cross-referenced against server.log via grep.
+            if isinstance(result, dict):
+                result.setdefault("trace_id", trace_id)
+            return result
+
+        return wrapper
+
+    return decorate
 
 mcp = FastMCP("iOS-GraphRAG")
 
@@ -191,6 +263,7 @@ def ensure_model() -> SentenceTransformer:
         "'downstream' = symbols that depend on this file (its subclasses/conformers/callers), and 'extensions'."
     ),
 )
+@_traced_handler(tool_name="swift_dependency_tracer")
 def _trace_dependencies(
     file_path: Annotated[str, Field(description="Absolute path to the Swift/ObjC file. Use paths from global_codebase_search results.")],
 ) -> dict:
@@ -261,6 +334,7 @@ def _trace_dependencies(
         "Returns a complete, structured JSON graph."
     ),
 )
+@_traced_handler(tool_name="objc_swift_bridge_finder")
 def _find_bridging_header_usage() -> dict:
     _reload_if_stale()
     # Phase 4f.1: push the BRIDGING filter into SQL. Walking GRAPH.edges is
@@ -309,6 +383,7 @@ def _find_bridging_header_usage() -> dict:
         "Extracts exactly the logic requested with zero waste."
     ),
 )
+@_traced_handler(tool_name="read_symbol_source")
 def _read_symbol(
     file_path: Annotated[str, Field(description="Absolute file path from search or tracer results.")],
     start_byte: Annotated[int, Field(description="Start byte offset from global_codebase_search results. Do not guess.", ge=0)],
@@ -343,6 +418,7 @@ def _read_symbol(
         "Suggested chain: global_codebase_search → swift_dependency_tracer → read_symbol_source."
     ),
 )
+@_traced_handler(tool_name="global_codebase_search")
 def _semantic_search(
     query: Annotated[str, Field(description="Natural language concept or exact class/function name. Do not pass regex, glob patterns, or raw bash syntax.")],
     top_k: Annotated[int, Field(description="Number of results to return.", ge=1, le=50)] = 10,
@@ -399,9 +475,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Order matters: logging is configured at module import (see basicConfig
-    # above), so the WARNING from configure_insecure_tls_if_requested() is
-    # captured by handlers that already exist.
+    # Phase 6b: centralized logger setup. Stderr keeps human-readable text
+    # for the MCP harness's stderr capture; the rotating file handler at
+    # ~/Library/Logs/ios-graphrag/server.log gets JSON lines. setup_logging()
+    # returns the path of the file handler so we can log it (handy for
+    # support-ticket triage).
+    from ._logging import setup_logging
+    log_file = setup_logging("server")
+
+    # Order matters: TLS configuration must come AFTER logging is wired so
+    # the WARNING emitted by configure_insecure_tls_if_requested() reaches
+    # both stderr and the JSON file.
     _tls.configure_insecure_tls_if_requested()
     if args.cert_bundle:
         _tls.configure_cert_bundle(args.cert_bundle)
@@ -412,7 +496,7 @@ def main() -> None:
         log.info(f"Python: {sys.executable}")
         log.info(f"DB path: {db_path}")
         log.info(f"DB exists: {Path(db_path).exists()}")
-        log.info(f"Log file: {_log_path}")
+        log.info(f"Log file: {log_file}")
 
         if not Path(db_path).exists():
             log.error(

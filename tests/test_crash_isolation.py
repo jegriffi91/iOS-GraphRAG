@@ -82,6 +82,18 @@ def _build_hostile_repo(repo_root: Path) -> dict:
     }
 
 
+def _indexer_env(tmp_path: Path) -> dict:
+    """Return an env dict with GRAPHRAG_LOG_DIR pointed at the tmpdir.
+
+    Phase 6b: keeps subprocess indexer runs from rotating their JSON
+    logs into the user's ``~/Library/Logs/ios-graphrag/`` directory.
+    """
+    import os as _os
+    env = _os.environ.copy()
+    env["GRAPHRAG_LOG_DIR"] = str(tmp_path / "graphrag-logs")
+    return env
+
+
 def test_crash_isolation_against_malformed_files(tmp_path: Path):
     """Run the indexer over a hostile tmpdir repo and assert the run
     completes with the valid file indexed."""
@@ -101,6 +113,7 @@ def test_crash_isolation_against_malformed_files(tmp_path: Path):
             "--full",
         ],
         cwd=str(_PROJECT_ROOT),
+        env=_indexer_env(tmp_path),
         capture_output=True,
         check=False,
     )
@@ -167,6 +180,7 @@ def test_crash_isolation_run_summary(tmp_path: Path):
             "--full",
         ],
         cwd=str(_PROJECT_ROOT),
+        env=_indexer_env(tmp_path),
         capture_output=True,
         check=False,
     )

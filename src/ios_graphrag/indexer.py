@@ -30,7 +30,10 @@ DB_DEFAULT = "knowledge-graph.sqlite"
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 BATCH_SIZE = 256
 MAX_SYMLINK_DEPTH = 10
-LOG_PATH = "indexing_errors.log"
+# Phase 6b moved indexer logs out of the cwd and into
+# ``~/Library/Logs/ios-graphrag/indexer.log``. ``LOG_PATH`` is intentionally
+# no longer defined here; ``_logging.setup_logging("indexer")`` owns the
+# resolved path and returns it for callers that need it.
 
 # Default project-specific model cache. Distinct from the Hugging Face hub
 # cache (`~/.cache/huggingface/hub/models--nomic-ai--nomic-embed-text-v1.5/`)
@@ -99,15 +102,15 @@ def _resolve_model_path() -> str:
 BLOCK_DIRS = {"Pods", "Carthage", "DerivedData", ".build", "vendor"}
 ALLOWED_EXTS = {".swift", ".h", ".m"}
 
-logging.basicConfig(
-    filename=LOG_PATH,
-    level=logging.WARNING,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
-
-# Module-level logger. Levels and additional handlers (stderr) are configured
-# in main(); when imported as a library the existing WARNING+ file logging
-# above is preserved so log_error() still flushes to indexing_errors.log.
+# Module-level logger. Phase 6b removed the module-level
+# ``logging.basicConfig(filename=...)`` that previously installed a
+# WARNING-only file handler at import time. The handler chain is now
+# configured by :func:`_logging.setup_logging` from ``main()`` (and by the
+# embedding worker subprocess on its own re-import). When this module is
+# imported as a library and ``setup_logging`` is never called, the standard
+# library's "last-resort" handler emits WARNING+ records to stderr — the
+# behavior matches the prior import-time semantics for callers that just use
+# :func:`log_error`.
 log = logging.getLogger(__name__)
 
 
@@ -804,21 +807,15 @@ def _generate_embeddings_worker(signatures: List[str]) -> List[np.ndarray]:
     if not signatures:
         return []
 
-    # The spawned worker re-runs module import which calls basicConfig at
-    # WARNING. Bump the logger to INFO and add a stderr handler so the
-    # "model loaded from ..." line is visible in the parent's terminal —
-    # users rely on that to confirm an offline override actually took.
-    import sys as _sys
-
-    _worker_logger = logging.getLogger(__name__)
-    _worker_logger.setLevel(logging.INFO)
-    if not any(
-        isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is _sys.stderr
-        for h in _worker_logger.handlers
-    ):
-        _stderr = logging.StreamHandler(_sys.stderr)
-        _stderr.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        _worker_logger.addHandler(_stderr)
+    # Phase 6b: the spawned worker is its own Python process — it does not
+    # see the parent's ``setup_logging`` call. Re-initialize the same logger
+    # chain here so worker log lines (notably "model loaded from ...", the
+    # offline-override confirmation) land in both the parent's stderr and
+    # the rotating ``~/Library/Logs/ios-graphrag/indexer.log`` file. The
+    # ``setup_logging`` helper is idempotent: re-calling it from a worker
+    # detaches any stale handlers and reattaches a clean pair.
+    from ._logging import setup_logging as _setup_logging
+    _setup_logging("indexer")
 
     _tls.configure_insecure_tls_if_requested()
 
@@ -1485,40 +1482,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Reconfigure logging for CLI usage:
-    #   - INFO level by default (set GRAPHRAG_LOG_LEVEL=DEBUG for the verbose
-    #     trace messages that previously went to stdout via print()).
-    #   - Stream to stderr so stdout stays clean (defensive: if the indexer is
-    #     ever invoked from the MCP server stdio context, leaking to stdout
-    #     would corrupt the protocol stream).
-    #   - Append to indexing_errors.log (replacing the module-level WARNING
-    #     handler installed at import time so we don't double-log every line).
-    import sys as _sys
-
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    level = getattr(logging, os.environ.get("GRAPHRAG_LOG_LEVEL", "INFO").upper(), logging.INFO)
-
-    root = logging.getLogger()
-    # Detach any handlers installed at module import so we don't double-emit
-    # (the module-level basicConfig adds one FileHandler with a different
-    # format; we replace it with our own to keep output consistent).
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
-        try:
-            handler.close()
-        except Exception:
-            pass
-    root.setLevel(level)
-
-    stderr_handler = logging.StreamHandler(_sys.stderr)
-    stderr_handler.setFormatter(fmt)
-    stderr_handler.setLevel(level)
-    root.addHandler(stderr_handler)
-
-    file_handler = logging.FileHandler(LOG_PATH)  # opens append mode by default
-    file_handler.setFormatter(fmt)
-    file_handler.setLevel(level)
-    root.addHandler(file_handler)
+    # Phase 6b: centralized logger setup. Stderr gets human-readable text
+    # (kept for the test_indexer_stdout invariant + interactive use); the
+    # rotating file handler at ~/Library/Logs/ios-graphrag/indexer.log gets
+    # JSON lines for grep/jq/structured analysis. GRAPHRAG_LOG_LEVEL still
+    # tunes verbosity (default INFO; DEBUG enables PHASE_* benchmark
+    # markers). GRAPHRAG_LOG_DIR overrides the path (used by tests).
+    from ._logging import setup_logging
+    setup_logging("indexer")
 
     # TLS configuration must come AFTER logging is wired so the WARNING emitted
     # by configure_insecure_tls_if_requested() actually reaches stderr/log file.

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import json
 import os
 import platform
 import re
@@ -58,7 +59,20 @@ DB_DEFAULT_NAME = "knowledge-graph.sqlite"
 DB_USER_DEFAULT = Path.home() / ".cache" / "ios-graphrag" / "graph.sqlite"
 HF_HUB_BASE = Path.home() / ".cache" / "huggingface" / "hub"
 MODEL_HUB_DIR = HF_HUB_BASE / "models--nomic-ai--nomic-embed-text-v1.5"
-LOG_DIR = Path.home() / "Library" / "Logs" / "ios-graphrag"
+# ``LOG_DIR`` is overridable via ``GRAPHRAG_LOG_DIR`` so tests don't pollute
+# the user's Library directory. Resolved per call via :func:`_active_log_dir`.
+DEFAULT_LOG_DIR = Path.home() / "Library" / "Logs" / "ios-graphrag"
+
+
+def _active_log_dir() -> Path:
+    override = os.environ.get("GRAPHRAG_LOG_DIR")
+    return Path(override) if override else DEFAULT_LOG_DIR
+
+
+# Backwards-compatible alias retained for tests / external readers that
+# still reference the constant. Resolved at import time; tests that need
+# a different value should call _active_log_dir() instead.
+LOG_DIR = DEFAULT_LOG_DIR
 
 
 def _resolve_db_path() -> Tuple[Path, str]:
@@ -372,25 +386,121 @@ def diagnose_log_directory() -> Diagnosis:
 # Log tailing
 # ---------------------------------------------------------------------------
 
-LOG_FILE_NAMES = ("indexing_errors.log", "server.log")
+# Phase 6b: the canonical log directory is ``~/Library/Logs/ios-graphrag/``
+# (or whatever ``GRAPHRAG_LOG_DIR`` overrides it to in tests). The two log
+# basenames live in that directory; the legacy ``indexing_errors.log`` next
+# to cwd is still tried as a fallback so doctor remains useful on a host
+# that hasn't re-indexed since the Phase 6b cutover.
+LOG_FILE_NAMES = ("indexer.log", "server.log")
+LEGACY_LOG_FILE_NAMES = ("indexing_errors.log", "server.log")
 
 
 def _candidate_log_paths() -> List[Path]:
     """Where the indexer / server might have written logs.
 
-    The current code still uses cwd-relative log files; in CI / repo dev
-    they show up at the project root. We try the project root and the
-    cwd both — first hit wins per filename.
+    Phase 6b path order: the canonical location first
+    (``~/Library/Logs/ios-graphrag/`` or ``GRAPHRAG_LOG_DIR``), then
+    legacy cwd / project-root fallbacks for hosts that haven't re-indexed
+    since the cutover. First hit wins per filename.
     """
     candidates: List[Path] = []
+    log_dir = _active_log_dir()
+    for name in LOG_FILE_NAMES:
+        p = log_dir / name
+        if p not in candidates:
+            candidates.append(p)
     cwd = Path.cwd()
     project = _project_root()
     for base in (cwd, project):
-        for name in LOG_FILE_NAMES:
+        for name in LEGACY_LOG_FILE_NAMES:
             p = base / name
             if p not in candidates:
                 candidates.append(p)
     return candidates
+
+
+_TAIL_ERROR_LEVELS = {"WARNING", "ERROR", "CRITICAL"}
+
+
+def _format_json_log_line(line: str) -> Optional[str]:
+    """Format one structured log line for ``--tail-errors`` output.
+
+    Returns ``None`` if the line should be skipped (i.e. its level is not
+    WARNING+). Returns the raw line (stripped) if the line isn't JSON --
+    so the caller can fall back to displaying the original text. Returns
+    a formatted string when the line parses as JSON and meets the level
+    filter.
+    """
+    try:
+        record = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        # Non-JSON line (legacy format / crash dump). Filter by substring.
+        upper = line.upper()
+        if any(level in upper for level in _TAIL_ERROR_LEVELS):
+            return line.rstrip()
+        return None
+
+    if not isinstance(record, dict):
+        return line.rstrip()
+
+    level = str(record.get("level", "")).upper()
+    if level not in _TAIL_ERROR_LEVELS:
+        return None
+
+    ts = record.get("ts", "")
+    logger_name = record.get("logger", "")
+    message = record.get("message", "")
+    parts = [str(ts), f"{level:<8s}", str(logger_name) + ":", str(message)]
+    trace_id = record.get("trace_id")
+    if trace_id:
+        parts.append(f"[trace_id={trace_id}]")
+    return "  ".join(parts)
+
+
+def _tail_error_lines(path: Path, n: int) -> List[str]:
+    """Return the last ``n`` WARNING+/ERROR lines from a log file.
+
+    Reads the entire file (logs are bounded by RotatingFileHandler at
+    50 MB), filters by level via :func:`_format_json_log_line`, and
+    returns the trailing window. Each returned string is already
+    formatted for printing.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [f"<could not read {path}: {exc}>"]
+    formatted: List[str] = []
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        rendered = _format_json_log_line(raw)
+        if rendered is not None:
+            formatted.append(rendered)
+    return formatted[-n:]
+
+
+def render_tail_errors(n: int = 20) -> str:
+    """Build the ``--tail-errors`` payload for ``ios-graphrag-doctor``.
+
+    Reads each canonical log file (``indexer.log`` + ``server.log``) from
+    the active log directory, prints the last ``n`` WARNING+/ERROR
+    records per file. Missing files print a friendly stub so support
+    requests on a fresh install still produce a useful diagnostic.
+    """
+    log_dir = _active_log_dir()
+    out: List[str] = []
+    for name in LOG_FILE_NAMES:
+        out.append(f"=== Last {n} errors from {name} ===")
+        path = log_dir / name
+        if not path.exists():
+            out.append(f"(no log file at {_redact_home(str(path))})")
+            continue
+        recent = _tail_error_lines(path, n)
+        if not recent:
+            out.append("(no WARNING/ERROR/CRITICAL records found)")
+        else:
+            out.extend(_redact_home(line) for line in recent)
+    return "\n".join(out)
 
 
 def _tail_lines(path: Path, n: int) -> List[str]:
@@ -693,7 +803,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "dependency-version detail and a redacted log tail suitable for an "
             "issue ticket; --verify runs the Phase 6c integrity checks "
             "(row counts, orphan edges, missing-file detection) and exits 1 "
-            "on any WARNING-class issue."
+            "on any WARNING-class issue; --tail-errors N prints the last N "
+            "WARNING+/ERROR records from indexer.log and server.log."
         ),
     )
     parser.add_argument(
@@ -710,10 +821,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "issue. Skips the default health diagnoses."
         ),
     )
+    parser.add_argument(
+        "--tail-errors",
+        type=int,
+        nargs="?",
+        const=20,
+        default=None,
+        metavar="N",
+        help=(
+            "Print the last N WARNING+/ERROR records from indexer.log and "
+            "server.log under ~/Library/Logs/ios-graphrag/ (or "
+            "$GRAPHRAG_LOG_DIR). Default N=20. Skips the default health "
+            "diagnoses."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.verify:
         return run_verify()
+
+    if args.tail_errors is not None:
+        print(render_tail_errors(n=args.tail_errors))
+        return 0
 
     diagnoses = run_default_diagnoses()
     print(render_default_report(diagnoses))

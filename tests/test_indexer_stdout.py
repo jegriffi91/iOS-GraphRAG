@@ -33,9 +33,17 @@ def test_indexer_stdout_is_empty(tmp_path: Path):
     session-scoped ``indexed_db_path`` fixture because we want a clean
     one-shot subprocess invocation that matches how the MCP server
     might shell out.
+
+    Phase 6b: ``GRAPHRAG_LOG_DIR`` redirects the indexer's rotating log
+    file out of ``~/Library/Logs/ios-graphrag/`` so this test does not
+    pollute the user's Library directory on every run.
     """
     tmp_db = tmp_path / "stdout-clean-test.sqlite"
     project_root = Path(__file__).parent.parent
+
+    import os as _os
+    env = _os.environ.copy()
+    env["GRAPHRAG_LOG_DIR"] = str(tmp_path / "logs")
 
     result = subprocess.run(
         [
@@ -46,6 +54,7 @@ def test_indexer_stdout_is_empty(tmp_path: Path):
             "--full",
         ],
         cwd=str(project_root),
+        env=env,
         capture_output=True,
         check=False,
     )
